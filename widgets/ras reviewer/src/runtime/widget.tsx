@@ -5,6 +5,7 @@ import Graphic from '@arcgis/core/Graphic'
 import SimpleFillSymbol from '@arcgis/core/symbols/SimpleFillSymbol'
 import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import { type IMConfig } from '../config'
+import ConfirmModal from './components/confirm-modal'
 import './app.css'
 
 type ReviewDecision = 'Approve' | 'Reject' | ''
@@ -120,6 +121,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
   const [rejectComments, setRejectComments] = useState('')
   const [statusMessage, setStatusMessage] = useState('Waiting for review target.')
   const [isLoading, setIsLoading] = useState(false)
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [jimuMapView, setJimuMapView] = useState<JimuMapView | null>(null)
   const [polygonLayer, setPolygonLayer] = useState<FeatureLayer | null>(null)
   const [reviewTable, setReviewTable] = useState<FeatureLayer | null>(null)
@@ -328,7 +330,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     }
   }
 
-  async function submitDecision() {
+  function startSubmitDecision() {
     if (!reviewTable || !activeTableRecord) {
       setStatusMessage('No review table record is ready to update.')
       return
@@ -341,6 +343,16 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
 
     if (decision === 'Reject' && !rejectComments.trim()) {
       setStatusMessage('Enter a rejection reason before saving.')
+      return
+    }
+
+    setShowConfirmModal(true)
+  }
+
+  async function submitDecision() {
+    if (!reviewTable || !activeTableRecord) {
+      setStatusMessage('No review table record is ready to update.')
+      setShowConfirmModal(false)
       return
     }
 
@@ -376,6 +388,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       setStatusMessage('Failed to save the review decision.')
     } finally {
       setIsLoading(false)
+      setShowConfirmModal(false)
     }
   }
 
@@ -433,7 +446,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         </div>
 
         <div className='button-row'>
-          <button className='review-button' onClick={submitDecision} disabled={isLoading}>
+          <button className='review-button' onClick={startSubmitDecision} disabled={isLoading}>
             {isLoading ? 'Working...' : 'Submit Review'}
           </button>
           <button className='review-button secondary' onClick={handleClose}>
@@ -441,6 +454,16 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
           </button>
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={showConfirmModal}
+        title={decision === 'Reject' ? 'Confirm rejection' : 'Confirm approval'}
+        message={decision === 'Reject'
+          ? `Are you sure you want to reject this record? Reason: ${rejectComments}`
+          : 'Are you sure you want to approve this record?'}
+        onConfirm={submitDecision}
+        onCancel={() => setShowConfirmModal(false)}
+      />
     </div>
   )
 }
