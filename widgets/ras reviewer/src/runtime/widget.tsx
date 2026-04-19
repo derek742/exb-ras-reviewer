@@ -1,8 +1,8 @@
 import { React, type AllWidgetProps } from 'jimu-core'
 import React, { useEffect, useRef, useState } from 'react'
 import FeatureLayer from '@arcgis/core/layers/FeatureLayer'
-import SimpleFillSymbol from '@arcgis/core/symbols/SimpleFillSymbol'
 import Graphic from '@arcgis/core/Graphic'
+import SimpleFillSymbol from '@arcgis/core/symbols/SimpleFillSymbol'
 import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
 import { type IMConfig } from '../config'
 import './app.css'
@@ -62,18 +62,55 @@ function createHighlightGraphic(geometry: __esri.Geometry): Graphic {
   })
 }
 
-function createPolygonLayer(url: string): FeatureLayer {
+function createFeatureLayer(url: string): FeatureLayer {
   return new FeatureLayer({
     url: url,
     outFields: ['*']
   })
 }
 
-function createReviewTable(url: string): FeatureLayer {
-  return new FeatureLayer({
-    url: url,
-    outFields: ['*']
+function getLayerTitle(layer: __esri.Layer): string {
+  return layer.title || ''
+}
+
+function findLayerByTitle(map: __esri.Map, title: string): FeatureLayer | null {
+  if (!title) {
+    return null
+  }
+
+  let matchedLayer: FeatureLayer | null = null
+
+  map.layers.forEach((layer) => {
+    if (matchedLayer) {
+      return
+    }
+
+    if (layer.type === 'feature' && getLayerTitle(layer) === title) {
+      matchedLayer = layer as FeatureLayer
+    }
   })
+
+  return matchedLayer
+}
+
+function findTableByTitle(map: __esri.Map, title: string): FeatureLayer | null {
+  if (!title || !map.tables) {
+    return null
+  }
+
+  let matchedTable: FeatureLayer | null = null
+
+  map.tables.forEach((table) => {
+    if (matchedTable) {
+      return
+    }
+
+    if (table.type === 'feature' && getLayerTitle(table) === title) {
+      matchedTable = table as FeatureLayer
+    }
+  })
+
+  return matchedTable
 }
 
 const Widget = (props: AllWidgetProps<IMConfig>) => {
@@ -93,14 +130,39 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
   const [statusMessage, setStatusMessage] = useState('Waiting for review target.')
   const [isLoading, setIsLoading] = useState(false)
   const [jimuMapView, setJimuMapView] = useState<JimuMapView | null>(null)
+  const [polygonLayer, setPolygonLayer] = useState<FeatureLayer | null>(null)
+  const [reviewTable, setReviewTable] = useState<FeatureLayer | null>(null)
   const highlightGraphicRef = useRef<Graphic | null>(null)
-
-  const polygonLayer = config?.polygonLayerUrl ? createPolygonLayer(config.polygonLayerUrl) : null
-  const reviewTable = config?.reviewTableUrl ? createReviewTable(config.reviewTableUrl) : null
 
   useEffect(() => {
     setUrlState(readUrlState(config))
   }, [config])
+
+  useEffect(() => {
+    if (!jimuMapView) {
+      return
+    }
+
+    const map = jimuMapView.view.map
+    const matchedPolygonLayer = findLayerByTitle(map, config.polygonLayerTitle || '')
+    const matchedReviewTable = findTableByTitle(map, config.reviewTableTitle || '')
+
+    if (matchedPolygonLayer) {
+      setPolygonLayer(matchedPolygonLayer)
+    } else if (config.polygonLayerUrl) {
+      setPolygonLayer(createFeatureLayer(config.polygonLayerUrl))
+    } else {
+      setPolygonLayer(null)
+    }
+
+    if (matchedReviewTable) {
+      setReviewTable(matchedReviewTable)
+    } else if (config.reviewTableUrl) {
+      setReviewTable(createFeatureLayer(config.reviewTableUrl))
+    } else {
+      setReviewTable(null)
+    }
+  }, [jimuMapView, config])
 
   useEffect(() => {
     if (!urlState.allotmentNumber) {
@@ -115,30 +177,16 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       return
     }
 
-    let cancelled = false
-
-    polygonLayer.load().then(() => {
-      if (cancelled) {
-        return
-      }
-
-      const map = jimuMapView.view.map
-      const alreadyInMap = map.layers.some((layer) => {
-        return layer.type === 'feature' && (layer as __esri.FeatureLayer).url === polygonLayer.url
-      })
-
-      if (!alreadyInMap) {
-        map.add(polygonLayer)
-      }
-    }).catch((error) => {
-      console.error(error)
+    const map = jimuMapView.view.map
+    const alreadyInMap = map.layers.some((layer) => {
+      return layer.type === 'feature' && (layer as FeatureLayer).url === polygonLayer.url
     })
 
-    const clickHandle = jimuMapView.view.on('click', async (event) => {
-      if (!polygonLayer) {
-        return
-      }
+    if (!alreadyInMap && config.polygonLayerUrl && polygonLayer.url === config.polygonLayerUrl) {
+      map.add(polygonLayer)
+    }
 
+    const clickHandle = jimuMapView.view.on('click', async (event) => {
       try {
         const hitResponse = await jimuMapView.view.hitTest(event)
         let graphic = null
@@ -171,7 +219,6 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     })
 
     return () => {
-      cancelled = true
       clickHandle.remove()
     }
   }, [jimuMapView, polygonLayer, config])
@@ -181,12 +228,12 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       return
     }
 
-    zoomToAndHighlightGeometry(activePolygon.geometry)
+    void zoomToAndHighlightGeometry(activePolygon.geometry)
   }, [jimuMapView, activePolygon?.geometry])
 
   async function loadReviewTarget(allotmentNumber: string, officeId: string, knownGeometry?: __esri.Geometry) {
     if (!polygonLayer || !reviewTable) {
-      setStatusMessage('Configure the polygon layer and review table URLs first.')
+      setStatusMessage('Configure the polygon layer and review table first.')
       return
     }
 
@@ -224,7 +271,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
 
       setActivePolygon({
         objectId: polygonObjectId,
-        allotmentNumber,
+        allotmentNumber: allotmentNumber,
         officeId: polygonOfficeId,
         geometry: polygonGeometry
       })
@@ -284,7 +331,6 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       const highlightGraphic = createHighlightGraphic(geometry)
       highlightGraphicRef.current = highlightGraphic
       jimuMapView.view.graphics.add(highlightGraphic)
-
       await jimuMapView.view.goTo(geometry)
     } catch (error) {
       console.error(error)
@@ -323,10 +369,11 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         updateFeatures: [updateFeature]
       })
 
-      if (editResult.updateFeatureResults?.[0]?.success) {
+      const updateResult = editResult.updateFeatureResults && editResult.updateFeatureResults[0]
+      if (updateResult && updateResult.success) {
         setActiveTableRecord({
           ...activeTableRecord,
-          decision,
+          decision: decision,
           comments: decision === 'Reject' ? rejectComments : ''
         })
         setStatusMessage('Review decision saved.')

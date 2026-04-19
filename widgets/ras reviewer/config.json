@@ -1,4 +1,6 @@
 {
+  "polygonLayerTitle": "",
+  "reviewTableTitle": "",
   "polygonLayerUrl": "",
   "reviewTableUrl": "",
   "polygonIdField": "ST_ALLOT",
