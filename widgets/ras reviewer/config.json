@@ -1,0 +1,50 @@
+{
+  "exampleConfigProperty": "test",
+  "PalLinks" : {
+    "FileGDBDownload": "Raptor_Paleo_FGDB_11.gdb.zip",
+    "FileGDBWorkflowGuide": "RAPTORGISPALEOGDBDownloadandDataEntry.pdf",
+    "FileGDBDataDic": "RAPTOR_Paleo_Data_Dictionary_Field_Collect_Publication.xlsx",
+    "Survey123Download": "PaleoS123AndFGDB_12.zip",
+    "Survey123WorkflowGuide": "RAPTORSurvey123GeoPlatformInstructions.pdf",
+    "Survey123GetStarted": "BLMGeoPlatformStepsforBLMPartnerDataEditors.pdf",
+    "MSAccessDownload": "RAPTOR_Paleo_Access_13.zip",
+    "MSAccessWorkflowGuide": "RAPTORGISSCISHPandDataEntry.pdf"
+  },
+  "ScienceLinks": {
+    "ScienceGISDataDic": "RAPTOR_GenSci_Data_Dictionary.xlsx",
+    "FileGDBDownload": "RAPTOR_SCIENCE_RESEARCH_POLY_gdb_14.zip",
+    "FileGDBInst": "RAPTORGISSCIGDBDownloadandDataEntry.pdf",
+    "Survey123Download": "Science_S123AndFGDB_15.zip",
+    "Survey123WorkflowGuide": "RAPTORSurvey123GeoPlatformInstructions.pdf",
+    "Survey123GetStarted": "BLMGeoPlatformStepsforBLMPartnerDataEditors.pdf",
+    "ShapefileDownload": "RAPTOR_SCIENCE_RESEARCH_POLY_16.zip",
+    "ShapeFileInst": "RAPTORGISSCISHPandDataEntry.pdf"
+  },
+  "downloadFilePaths" : {
+    "PAL": {
+      "fileGDB": "Raptor_Paleo_FGDB_11.gdb.zip",
+      "fileGDBInst": "RAPTORGISPALEOGDBDownloadandDataEntry.pdf",
+      "fileS123": "PaleoS123AndFGDB_12.zip",
+      "fileS123Inst": "RAPTORSurvey123GeoPlatformInstructions.pdf",
+      "fileMAccess": "RAPTOR_Paleo_Access_13.zip",
+      "fileMAccessInst": "RAPTORGISSCISHPandDataEntry.pdf"
+    },
+    "SCI": {
+      "fileGDB": "RAPTOR_SCIENCE_RESEARCH_POLY_gdb_14.zip",
+      "fileGDBInst": "RAPTORGISSCIGDBDownloadandDataEntry.pdf",
+      "fileS123": "Science_S123AndFGDB_15.zip",
+      "fileS123Inst": "RAPTORSurvey123GeoPlatformInstructions.pdf",
+      "fileMAccess": "RAPTOR_SCIENCE_RESEARCH_POLY_16.zip",
+      "fileMAccessInst": "RAPTORGISSCISHPandDataEntry.pdf"
+    }
+  },
+  "RecLinks": {
+    "ScienceGISDataDic": "RAPTOR_GenSci_Data_Dictionary.xlsx",
+    "FileGDBDownload": "RAPTOR_SCIENCE_RESEARCH_POLY_gdb_14.zip",
+    "Survey123Download": "Science_S123AndFGDB_15.zip",
+    "Survey123WorkflowGuide": "RAPTORSurvey123GeoPlatformInstructions.pdf",
+    "Survey123GetStarted": "BLMGeoPlatformStepsforBLMPartnerDataEditors.pdf",
+    "ShapefileDownload": "RAPTOR_SCIENCE_RESEARCH_POLY_16.zip"
+  }
+
+}
