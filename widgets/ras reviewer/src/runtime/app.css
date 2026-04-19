@@ -55,3 +55,15 @@
 .status-text {
   color: #d7e3ff;
 }
+
+.status-text.success {
+  color: #7CFC9A;
+}
+
+.status-text.error {
+  color: #FF9A9A;
+}
+
+.status-text.info {
+  color: #d7e3ff;
+}

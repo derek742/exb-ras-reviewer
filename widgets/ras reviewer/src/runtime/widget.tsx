@@ -118,6 +118,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
   const [decision, setDecision] = useState<ReviewDecision>('')
   const [rejectComments, setRejectComments] = useState('')
   const [statusMessage, setStatusMessage] = useState('Waiting for review target.')
+  const [statusType, setStatusType] = useState<'info' | 'success' | 'error'>('info')
   const [isLoading, setIsLoading] = useState(false)
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [jimuMapView, setJimuMapView] = useState<JimuMapView | null>(null)
@@ -224,11 +225,13 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
 
   async function loadReviewTarget(allotmentNumber: string, officeId: string, knownGeometry?: __esri.Geometry) {
     if (!polygonLayer || !reviewTable) {
+      setStatusType('error')
       setStatusMessage('Configure the polygon layer and review table first.')
       return
     }
 
     setIsLoading(true)
+    setStatusType('info')
     setStatusMessage('Loading polygon and review record...')
 
     try {
@@ -250,6 +253,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
           setActiveTableRecord(null)
           setDecision('')
           setRejectComments('')
+          setStatusType('error')
           setStatusMessage('No polygon was found for that allotment.')
           return
         }
@@ -279,6 +283,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         setActiveTableRecord(null)
         setDecision('')
         setRejectComments('')
+        setStatusType('error')
         setStatusMessage('Polygon found, but no matching review table record was found.')
         return
       }
@@ -300,9 +305,11 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       }
 
       setRejectComments(existingComments)
+      setStatusType('success')
       setStatusMessage('Review target loaded.')
     } catch (error) {
       console.error(error)
+      setStatusType('error')
       setStatusMessage('Failed to load the review target.')
     } finally {
       setIsLoading(false)
@@ -330,16 +337,19 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
 
   function startSubmitDecision() {
     if (!reviewTable || !activeTableRecord) {
+      setStatusType('error')
       setStatusMessage('No review table record is ready to update.')
       return
     }
 
     if (!decision) {
+      setStatusType('error')
       setStatusMessage('Select Approve or Reject first.')
       return
     }
 
     if (decision === 'Reject' && !rejectComments.trim()) {
+      setStatusType('error')
       setStatusMessage('Enter a rejection reason before saving.')
       return
     }
@@ -349,12 +359,14 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
 
   async function submitDecision() {
     if (!reviewTable || !activeTableRecord) {
+      setStatusType('error')
       setStatusMessage('No review table record is ready to update.')
       setShowConfirmModal(false)
       return
     }
 
     setIsLoading(true)
+    setStatusType('info')
     setStatusMessage('Saving review decision...')
 
     try {
@@ -377,12 +389,15 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
           decision: decision,
           comments: decision === 'Reject' ? rejectComments : ''
         })
-        setStatusMessage('Review decision saved.')
+        setStatusType('success')
+        setStatusMessage('Review decision saved successfully.')
       } else {
+        setStatusType('error')
         setStatusMessage('The review decision could not be saved.')
       }
     } catch (error) {
       console.error(error)
+      setStatusType('error')
       setStatusMessage('Failed to save the review decision.')
     } finally {
       setIsLoading(false)
@@ -440,7 +455,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         <div className='reviewer-section'>
           <div><strong>Current Table Decision:</strong> {activeTableRecord?.decision || 'None'}</div>
           <div><strong>Current Comments:</strong> {activeTableRecord?.comments || 'None'}</div>
-          <div className='status-text'>{statusMessage}</div>
+          <div className={`status-text ${statusType}`}>{statusMessage}</div>
         </div>
 
         <div className='button-row'>
