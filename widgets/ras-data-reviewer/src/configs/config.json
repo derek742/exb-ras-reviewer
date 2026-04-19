@@ -1,0 +1,8 @@
+{
+  "rasLinks": {
+    "notallotmentTableUrl": "https://gis.dev.blm.doi.net/arcgisauth/rest/services/RAS_locked/BLM_Natl_RAS_Approvals/FeatureServer/0",
+    "allotmentTableUrl": "    https://gis.dev.blm.doi.net/arcgisauthpub/rest/services/RAS_locked/BLM_Natl_RAS_Approvals/FeatureServer/0",
+    "pastureTableUrl": "https://gis.dev.blm.doi.net/arcgisauth/rest/services/RAS_locked/BLM_Natl_RAS_Approvals/FeatureServer/2",
+    "allottmentPolygonLayerUrl": "https://devgis.blm.gov/arcgisfed/rest/services/range/BLM_Natl_RAS_Allotments/FeatureServer"
+  }
+}
