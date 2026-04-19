@@ -28,14 +28,12 @@ type TableRecordSummary = {
   comments: string
 }
 
-function readUrlState(config: IMConfig): UrlState {
+function readUrlState(): UrlState {
   const params = new URLSearchParams(window.location.search)
-  const polygonParamName = config?.polygonUrlParam || 'allotmentNR'
-  const officeParamName = config?.officeUrlParam || 'officeid'
 
   return {
-    allotmentNumber: params.get(polygonParamName) || '',
-    officeId: params.get(officeParamName) || ''
+    allotmentNumber: params.get('allotmentNR') || '',
+    officeId: params.get('officeid') || ''
   }
 }
 
@@ -128,8 +126,8 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
   const highlightGraphicRef = useRef<Graphic | null>(null)
 
   useEffect(() => {
-    setUrlState(readUrlState(config))
-  }, [config])
+    setUrlState(readUrlState())
+  }, [])
 
   useEffect(() => {
     if (!jimuMapView) {

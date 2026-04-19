@@ -7,7 +7,5 @@
   "reviewTableIdField": "ST_ALLOT",
   "officeField": "officeid",
   "decisionField": "DECISION",
-  "commentsField": "Comments",
-  "polygonUrlParam": "allotmentNR",
-  "officeUrlParam": "officeid"
+  "commentsField": "Comments"
 }

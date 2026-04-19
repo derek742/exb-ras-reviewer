@@ -10,8 +10,6 @@ export interface Config {
   officeField: string
   decisionField: string
   commentsField: string
-  polygonUrlParam: string
-  officeUrlParam: string
 }
 
 export type IMConfig = ImmutableObject<Config>
