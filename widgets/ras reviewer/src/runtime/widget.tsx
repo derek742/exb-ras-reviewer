@@ -12,9 +12,6 @@ type ReviewDecision = 'Approve' | 'Reject' | ''
 type UrlState = {
   allotmentNumber: string
   officeId: string
-  appName: string
-  appNumber: string
-  taskId: string
 }
 
 type PolygonSummary = {
@@ -37,10 +34,7 @@ function readUrlState(config: IMConfig): UrlState {
 
   return {
     allotmentNumber: params.get(polygonParamName) || '',
-    officeId: params.get(officeParamName) || '',
-    appName: params.get('appName') || '',
-    appNumber: params.get('appNumber') || '',
-    taskId: params.get('taskId') || ''
+    officeId: params.get(officeParamName) || ''
   }
 }
 
@@ -118,10 +112,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
 
   const [urlState, setUrlState] = useState<UrlState>({
     allotmentNumber: '',
-    officeId: '',
-    appName: '',
-    appNumber: '',
-    taskId: ''
+    officeId: ''
   })
   const [activePolygon, setActivePolygon] = useState<PolygonSummary | null>(null)
   const [activeTableRecord, setActiveTableRecord] = useState<TableRecordSummary | null>(null)
@@ -405,9 +396,6 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         <div className='reviewer-section'>
           <div><strong>Allotment:</strong> {activePolygon?.allotmentNumber || urlState.allotmentNumber || 'Not set'}</div>
           <div><strong>Office ID:</strong> {activePolygon?.officeId || urlState.officeId || 'Not set'}</div>
-          <div><strong>Application Name:</strong> {urlState.appName || 'Not set'}</div>
-          <div><strong>Application Number:</strong> {urlState.appNumber || 'Not set'}</div>
-          <div><strong>Task ID:</strong> {urlState.taskId || 'Not set'}</div>
         </div>
 
         <div className='reviewer-section'>
