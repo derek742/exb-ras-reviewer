@@ -1,12 +1,12 @@
 {
-  "polygonLayerTitle": "",
-  "reviewTableTitle": "",
-  "polygonLayerUrl": "",
-  "reviewTableUrl": "",
+  "polygonLayerTitle": "Grazing Allotment Polygons",
+  "reviewTableTitle": "Grazing Allotment Reviews ",
+  "polygonLayerUrl": "https://gis.blm.gov/arcgis/rest/services/BLM_Natl_Grazing_Allotments/MapServer/12",
+  "reviewTableUrl": "https://devgis.blm.gov/arcgisfed/rest/services/range/BLM_Natl_RAS_Allotments/FeatureServer/1",
   "polygonIdField": "ST_ALLOT",
   "polygonJoinField": "Original_GlobalID",
   "tableJoinField": "Original_GlobalID",
   "officeField": "officeid",
   "approvalField": "APPROVAL_FLAG",
-  "commentsField": "Comments"
+  "commentsField": "COMMENTS"
 }
