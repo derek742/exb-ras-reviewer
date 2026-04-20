@@ -4,8 +4,9 @@
   "polygonLayerUrl": "",
   "reviewTableUrl": "",
   "polygonIdField": "ST_ALLOT",
-  "reviewTableIdField": "ST_ALLOT",
+  "polygonJoinField": "Original_GlobalID",
+  "tableJoinField": "Original_GlobalID",
   "officeField": "officeid",
-  "decisionField": "DECISION",
+  "approvalField": "APPROVAL_FLAG",
   "commentsField": "Comments"
 }

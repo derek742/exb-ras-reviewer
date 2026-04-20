@@ -6,9 +6,10 @@ export interface Config {
   polygonLayerUrl: string
   reviewTableUrl: string
   polygonIdField: string
-  reviewTableIdField: string
+  polygonJoinField: string
+  tableJoinField: string
   officeField: string
-  decisionField: string
+  approvalField: string
   commentsField: string
 }
 
