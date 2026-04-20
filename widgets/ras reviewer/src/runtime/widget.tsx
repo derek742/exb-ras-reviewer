@@ -19,7 +19,7 @@ type PolygonSummary = {
   objectId: string
   allotmentNumber: string
   officeId: string
-  officeName: string
+  allotmentName: string
   joinValue: string
   geometry?: __esri.Geometry
 }
@@ -234,7 +234,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         const allotmentNumber = String(attributes[polygonFieldName] || '')
         const officeId = String(attributes[officeFieldName] || '')
         const joinValue = String(attributes[joinFieldName] || '')
-        const officeName = String(attributes.OFFICE || '')
+        const allotmentName = String(attributes.ALLOT_NAME || '')
 
         if (!allotmentNumber || !joinValue) {
           return
@@ -244,7 +244,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
           objectId: String(attributes.OBJECTID || ''),
           allotmentNumber: allotmentNumber,
           officeId: officeId,
-          officeName: officeName,
+          allotmentName: allotmentName,
           joinValue: joinValue,
           geometry: graphic.geometry
         })
@@ -400,7 +400,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         objectId: String(polygonAttributes.OBJECTID || ''),
         allotmentNumber: String(polygonAttributes[polygonIdField] || allotmentNumber),
         officeId: String(polygonAttributes[officeField] || officeId),
-        officeName: String(polygonAttributes.OFFICE || ''),
+        allotmentName: String(polygonAttributes.ALLOT_NAME || ''),
         joinValue: joinValue,
         geometry: polygonFeature.geometry
       })
@@ -607,7 +607,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         <div className='reviewer-section'>
           <div><strong>Allotment:</strong> {activePolygon?.allotmentNumber || urlState.allotmentNumber || 'Not set'}</div>
           <div><strong>Office ID:</strong> {activePolygon?.officeId || urlState.officeId || 'Not set'}</div>
-          <div><strong>Office:</strong> {activePolygon?.officeName || 'Not set'}</div>
+          <div><strong>Allotment Name:</strong> {activePolygon?.allotmentName || 'Not set'}</div>
         </div>
 
         <div className='reviewer-section'>
