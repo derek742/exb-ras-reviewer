@@ -666,19 +666,25 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
 
   return (
     <div className='widget-demo jimu-widget m-2 ras-review-widget'>
-      <JimuMapViewComponent
-        useMapWidgetId={useMapWidgetIds?.[0]}
-        onActiveViewChange={(view) => {
-          console.log('[RAS Reviewer] Active map view changed', {
-            hasView: Boolean(view),
-            useMapWidgetId: useMapWidgetIds?.[0] || null
-          })
-          setJimuMapView(view || null)
-        }}
-      />
+      {props.useMapWidgetIds && props.useMapWidgetIds.length === 1 && (
+        <JimuMapViewComponent
+          useMapWidgetId={props.useMapWidgetIds[0]}
+          onActiveViewChange={(view) => {
+            console.log('[RAS Reviewer] Active map view changed', {
+              hasView: Boolean(view),
+              useMapWidgetId: props.useMapWidgetIds?.[0] || null
+            })
+            setJimuMapView(view || null)
+          }}
+        />
+      )}
 
       <div className='reviewer-container'>
         <h3>RAS Data Review</h3>
+
+        {(!props.useMapWidgetIds || props.useMapWidgetIds.length === 0) && (
+          <div className='status-text error'>Connect this widget to a map in the widget settings first.</div>
+        )}
 
         <div className='reviewer-section'>
           <label><strong>Map Filter</strong></label>
