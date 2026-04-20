@@ -1,295 +1,671 @@
 import { React, type AllWidgetProps } from 'jimu-core'
-import React, { useState, useEffect, useRef } from 'react'
-import { type IMConfig } from '../config'
-import { Button } from 'reactstrap'
-import './app.css'
-import AcceptModal from './modals/acceptmodal'
-import RejectModal from './modals/rejectmodal'
-import 'bootstrap/dist/css/bootstrap.min.css'
+import React, { useEffect, useRef, useState } from 'react'
 import FeatureLayer from '@arcgis/core/layers/FeatureLayer'
-
-import * as geoprocessor from '@arcgis/core/rest/geoprocessor.js'
-import Color from 'color'
-import { JimuMap } from 'jimu-ui/advanced/map'
+import Graphic from '@arcgis/core/Graphic'
+import SimpleFillSymbol from '@arcgis/core/symbols/SimpleFillSymbol'
 import { JimuMapViewComponent, type JimuMapView } from 'jimu-arcgis'
-import OAuthInfo from "@arcgis/core/identity/OAuthInfo.js";
-import IdentityManager from "@arcgis/core/identity/IdentityManager.js";
-import Portal from "@arcgis/core/portal/Portal.js";
+import { type IMConfig } from '../config'
+import ConfirmModal from './components/confirm-modal'
+import './app.css'
 
-type downloadType = {
-  module: string
-  infile: string
+type ReviewDecision = 'Approved' | 'Rejected' | ''
+
+type UrlState = {
+  allotmentNumber: string
+  officeId: string
+}
+
+type PolygonSummary = {
+  objectId: string
+  allotmentNumber: string
+  officeId: string
+  officeName: string
+  joinValue: string
+  geometry?: __esri.Geometry
+}
+
+type TableRecordSummary = {
+  objectId: string
+  decision: string
+  comments: string
+  joinValue: string
+}
+
+function readUrlState(): UrlState {
+  const params = new URLSearchParams(window.location.search)
+
+  return {
+    allotmentNumber: params.get('allotmentNR') || '',
+    officeId: params.get('officeid') || ''
+  }
+}
+
+function buildWhereClause(fieldName: string, value: string): string {
+  const safeValue = value.replace(/'/g, "''")
+  return `${fieldName} = '${safeValue}'`
+}
+
+function buildAndWhereClause(firstField: string, firstValue: string, secondField: string, secondValue: string): string {
+  return `${buildWhereClause(firstField, firstValue)} AND ${buildWhereClause(secondField, secondValue)}`
+}
+
+function createHighlightGraphic(geometry: __esri.Geometry): Graphic {
+  return new Graphic({
+    geometry: geometry,
+    symbol: new SimpleFillSymbol({
+      color: [76, 111, 255, 0.15],
+      outline: {
+        color: [76, 111, 255, 1],
+        width: 2
+      }
+    })
+  })
+}
+
+function createFeatureLayer(url: string): FeatureLayer {
+  return new FeatureLayer({
+    url: url,
+    outFields: ['*']
+  })
+}
+
+function getLayerTitle(layer: __esri.Layer): string {
+  return layer.title || ''
+}
+
+function findLayerByTitle(map: __esri.Map, title: string): FeatureLayer | null {
+  if (!title) {
+    return null
+  }
+
+  let matchedLayer: FeatureLayer | null = null
+
+  map.layers.forEach((layer) => {
+    if (matchedLayer) {
+      return
+    }
+
+    if (layer.type === 'feature' && getLayerTitle(layer) === title) {
+      matchedLayer = layer as FeatureLayer
+    }
+  })
+
+  return matchedLayer
+}
+
+function findTableByTitle(map: __esri.Map, title: string): FeatureLayer | null {
+  if (!title || !map.tables) {
+    return null
+  }
+
+  let matchedTable: FeatureLayer | null = null
+
+  map.tables.forEach((table) => {
+    if (matchedTable) {
+      return
+    }
+
+    if (table.type === 'feature' && getLayerTitle(table) === title) {
+      matchedTable = table as FeatureLayer
+    }
+  })
+
+  return matchedTable
+}
+
+function chunkValues(values: string[], size: number): string[][] {
+  const chunks: string[][] = []
+
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size))
+  }
+
+  return chunks
+}
+
+function buildInClause(fieldName: string, values: string[]): string {
+  const quotedValues = values.map((value) => `'${value.replace(/'/g, "''")}'`)
+  return `${fieldName} IN (${quotedValues.join(', ')})`
+}
+
+function getApprovalModeLabel(value: string): string {
+  if (value === 'Approved' || value === 'Rejected') {
+    return value
+  }
+
+  return 'Unallocated'
 }
 
 const Widget = (props: AllWidgetProps<IMConfig>) => {
-  const [appMessage, setAppMessage] = useState('PAL')
-  const [records, setRecords] = useState('1')
-  const [isAccept, setIsAccept] = useState(null)
-  const [isReject, setIsReject] = useState(null)
+  const { config, useMapWidgetIds } = props
 
-  const [appName, setAppName] = useState('')
-  const [taskId, setTaskId] = useState('')
-  const [appType, setAppType] = useState('')
-  const [appNumber, setAppNumber] = useState('')
-  const [isSuccessful, setIsSuccessful] = useState('')
-  const [message, setMessage] = useState('')
-  const [messageclassName, setMessageclassName] = useState('')
-  const [jimuMapView, setJimuMapView] = useState<JimuMapView>()
-  const layer = useRef(new FeatureLayer())
-
-
-    // SET OAuth 2 & portal
-    const info = new OAuthInfo({
-      appId: 'YAFmhFZoCR5RzF6w',
-      popup: true,
-      flowType: 'authorization-code',
-      portalUrl: 'https://gis.test.blm.doi.net/portal/'
-    })
-    IdentityManager.registerOAuthInfos([info])
- 
-    const portal = new Portal({
-      url: 'https://gis.test.blm.doi.net/portal/'
-    })
- 
-    portal.load().then((p: Portal) => {
-      console.log(p)
-      // this.setState({
-      //   userName: p.user?.fullName,
-      //   userEmail: p.user?.email
-      // })
- 
-      //Fetch Symbols
-      p.queryItems({ query: "id: 97fef03068a74ece9d7762d9ac83e8eb" }).then(d => {
-        const item = d.results[0]
- 
-        console.log('symmmddddddddmmmmmmbolitem', item)
- 
-        item.fetchData().then(data => {
-          console.log('daaaaaaada', data?.items[0])
-        })
- 
-        // const testSymbol = new WebStyleSymbol({
-        //   name: 'Bench',
-        //   portal: item.portal,
-        //   styleName: item.title
-        //   // styleUrl: item.itemUrl
-        // })
- 
-        // console.log('symmmddddddddmmmmmmbol', testSymbol)
- 
-        // testSymbol.fetchSymbol().then(symbolData => {
-        //   console.log('symmmmmxxxxxmmmmbol', symbolData)
-        // }).catch(error => {
-        //   console.log('symmmmmmmmxxxmbol error', error)
-        // })
- 
-      }).catch(error => {
-        console.log('symmmmmmmmmbol error', error)
-      })
- 
- 
-    })
-
- /** ADD: **/
-const activeViewChangeHandler = (jmv: JimuMapView) => {
-  if (jmv) {
-    setJimuMapView(jmv)
-    addFeatureLayer()
-    // addLayer()
-  }
-}
-
-
-  // url parameters coming from raptor to accept or reject
-  // https://permits.test.blm.doi.net:8111/gis-data-review/?raptorType=PAL&appNumber=2024-00474&appName=derek%20test&taskId=62109
-
-  // const addLayer = () => {
-    // layer.current = new FeatureLayer({
-    //   url: 'https://gis.test.blm.doi.net/arcgis/rest/services/Facility/BLM_Natl_FAMS_PointLocations/MapServer/1',
-    //   editingEnabled: true,
-    //   popupEnabled: true
-    // })
-
-
-
-  
-
-  
+  const [urlState, setUrlState] = useState<UrlState>({
+    allotmentNumber: '',
+    officeId: ''
+  })
+  const [activePolygon, setActivePolygon] = useState<PolygonSummary | null>(null)
+  const [activeTableRecord, setActiveTableRecord] = useState<TableRecordSummary | null>(null)
+  const [decision, setDecision] = useState<ReviewDecision>('')
+  const [rejectComments, setRejectComments] = useState('')
+  const [statusMessage, setStatusMessage] = useState('Waiting for review target.')
+  const [statusType, setStatusType] = useState<'info' | 'success' | 'error'>('info')
+  const [isLoading, setIsLoading] = useState(false)
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
+  const [showApproved, setShowApproved] = useState(true)
+  const [showRejected, setShowRejected] = useState(true)
+  const [jimuMapView, setJimuMapView] = useState<JimuMapView | null>(null)
+  const [polygonLayer, setPolygonLayer] = useState<FeatureLayer | null>(null)
+  const [reviewTable, setReviewTable] = useState<FeatureLayer | null>(null)
+  const highlightGraphicRef = useRef<Graphic | null>(null)
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const appName = params.get('appName')
-    const raptorType = params.get('raptorType')
-    const Id = params.get('taskId')
-    const appNumber = params.get('appNumber')
-
-    setAppName(appName)
-    setAppType(raptorType)
-    setTaskId(Id)
-    setAppNumber(appNumber)
-    // console.log('ActionType is:', action)
-    // console.log('raptor Type is:', raptorType)
-    // console.log('taskId:', Id)
-    // console.log('appNumber is:', appNumber)
+    setUrlState(readUrlState())
   }, [])
 
-  // const runQuery = () => {
-
   useEffect(() => {
-    let query;
-    query = layer.current.createQuery()
-    query.where = `Version_NM = 'test0701_12'`
-    // query.where = `Version_NM='${appNumber}'`
-    query.returnGeometry = true
-
-    layer.current.queryFeatures(query).then( function(result) {
-     console.log(result.features)
-    //  view.goTo({
-    //   target: result.features
-    //  })
-
-    }).catch(function (error) {
-      console.log('Error querying feature service.')
-    })
-  },[layer.current])
-// }
-
-  const toggleAcceptModal = () => setIsAccept(!isAccept)
-  const toggleRejectModal = () => setIsReject(!isReject)
-
-  const openRejectModal = () => {
-    setIsAccept(false)
-    setIsReject(true)
-    console.log('open reject modal')
-  }
-
-  const handleClose = () => {
-    window.history.back()
-    console.log('close')
-  }
-
-const addFeatureLayer = () => {
-    // *** ADD ***
-  // create a new FeatureLayer
-  if (jimuMapView) {
-  const layer = new FeatureLayer({
-    url: 'https://services3.arcgis.com/GVgbJbqm8hXASVYi/arcgis/rest/services/Trailheads_Styled/FeatureServer/0'
-  })
-
-  // Add the layer to the map (accessed through the Experience Builder JimuMapView data source)
-  jimuMapView?.view.map.add(layer)
-}
- }
-
-  const acceptWorkflow = () => {
-    //ACCEPT
-    const params = { inVersionName: appNumber, flgApprove: true, codedVal: 'RaPt0r4eVer' }
-    // let params = { inVersionName: urlParamsRaptor.appNumber, flgApprove: true, codedVal: widgetContext.appConfig.codedValueforApproveReject }
-
-    const gpUrl = 'https://gis.dev.blm.doi.net/arcgisauthpub/rest/services/RAPTOR/BLM_Natl_ApproveReject/GPServer/ApproveReject_RaptorData/submitJob'
-    // let gp = new Geoprocessor()
-    //gp.setUpdateDelay(600000);
-    geoprocessor.submitJob(gpUrl, params)
-    function statusCallback(jobInfo) {
-      console.log(jobInfo)
-      // geoprocessor.cancelJobStatusUpdates(jobInfo.jobId)
+    if (!jimuMapView) {
+      return
     }
-    function completeCallback(jobInfo) {
-      console.log(jobInfo.jobStatus)
-    }
-}
 
-  const rejectWorkflow = () => {
-    const rejectReason = prompt('Enter the reason for the data rejection \n (Reason will be sent to the Permittee and audit log):', '')
+    const map = jimuMapView.view.map
+    const matchedPolygonLayer = findLayerByTitle(map, config.polygonLayerTitle || '')
+    const matchedReviewTable = findTableByTitle(map, config.reviewTableTitle || '')
 
-    if (rejectReason === '' || rejectReason == null) {
-      alert('BLM must provide a reason to the user for rejecting the data.')
-      return false
-    }
-    const params = { inVersionName: appNumber, flgApprove: true, codedVal: 'RaPt0r4eVer' }
-    // let params = { inVersionName: urlParamsRaptor.appNumber, flgApprove: true, codedVal: widgetContext.appConfig.codedValueforApproveReject }
-
-    const gpUrl = 'https://gis.dev.blm.doi.net/arcgisauthpub/rest/services/RAPTOR/BLM_Natl_ApproveReject/GPServer/ApproveReject_RaptorData/submitJob'
-    // let gp = new Geoprocessor()
-    //gp.setUpdateDelay(600000);
-    geoprocessor.submitJob(gpUrl, params)
-    function statusCallback(jobInfo) {
-      //console.log(jobInfo);
-      // gp.cancelJobStatusUpdates(jobInfo.jobId)
-    }
-    function completeCallback(jobInfo) {
-      console.log(jobInfo.jobStatus)
-    }
-    return true
-  }
-
-  function getCookie (cname) {
-    const name = cname + '='
-    const decodedCookies = decodeURIComponent(document.cookie)
-    console.log(document.cookie)
-    const ca = decodedCookies.split(';')
-    for (let i = 0; i < ca.length; i++) {
-      let c = ca[i]
-      while (c.charAt(0) === ' ') {
-        c = c.substring(1)
-      }
-      if (c.indexOf(name) === 0) {
-        return c.substring(name.length, c.length)
-      }
-    }
-    return ''
-  }
-
-  useEffect(() => {
-    if (appType === 'SCI') {
-      setAppMessage('Science locality Point Records.')
-    } else if (appType === 'PAL') {
-      setAppMessage('Paleo locality Point Records.')
+    if (matchedPolygonLayer) {
+      setPolygonLayer(matchedPolygonLayer)
+    } else if (config.polygonLayerUrl) {
+      setPolygonLayer(createFeatureLayer(config.polygonLayerUrl))
     } else {
-      setAppMessage('Recreation locality Point Records.')
+      setPolygonLayer(null)
     }
-  }, [appType])
+
+    if (matchedReviewTable) {
+      setReviewTable(matchedReviewTable)
+    } else if (config.reviewTableUrl) {
+      setReviewTable(createFeatureLayer(config.reviewTableUrl))
+    } else {
+      setReviewTable(null)
+    }
+  }, [jimuMapView, config])
+
+  useEffect(() => {
+    if (!urlState.allotmentNumber || !urlState.officeId) {
+      return
+    }
+
+    void loadReviewTargetFromUrl(urlState.allotmentNumber, urlState.officeId)
+  }, [urlState.allotmentNumber, urlState.officeId, polygonLayer, reviewTable])
+
+  useEffect(() => {
+    if (!jimuMapView || !polygonLayer) {
+      return
+    }
+
+    const map = jimuMapView.view.map
+    const alreadyInMap = map.layers.some((layer) => {
+      return layer.type === 'feature' && (layer as FeatureLayer).url === polygonLayer.url
+    })
+
+    if (!alreadyInMap && config.polygonLayerUrl && polygonLayer.url === config.polygonLayerUrl) {
+      map.add(polygonLayer)
+    }
+
+    const clickHandle = jimuMapView.view.on('click', async (event) => {
+      try {
+        const hitResponse = await jimuMapView.view.hitTest(event)
+        let graphic = null
+
+        for (const result of hitResponse.results) {
+          if (result.graphic?.layer === polygonLayer) {
+            graphic = result.graphic
+            break
+          }
+        }
+
+        if (!graphic) {
+          return
+        }
+
+        const attributes = graphic.attributes || {}
+        const polygonFieldName = config.polygonIdField || 'ST_ALLOT'
+        const officeFieldName = config.officeField || 'officeid'
+        const joinFieldName = config.polygonJoinField || 'Original_GlobalID'
+
+        const allotmentNumber = String(attributes[polygonFieldName] || '')
+        const officeId = String(attributes[officeFieldName] || '')
+        const joinValue = String(attributes[joinFieldName] || '')
+        const officeName = String(attributes.OFFICE || '')
+
+        if (!allotmentNumber || !joinValue) {
+          return
+        }
+
+        await loadReviewTargetFromPolygon({
+          objectId: String(attributes.OBJECTID || ''),
+          allotmentNumber: allotmentNumber,
+          officeId: officeId,
+          officeName: officeName,
+          joinValue: joinValue,
+          geometry: graphic.geometry
+        })
+      } catch (error) {
+        console.error(error)
+      }
+    })
+
+    return () => {
+      clickHandle.remove()
+    }
+  }, [jimuMapView, polygonLayer, config])
+
+  useEffect(() => {
+    if (!jimuMapView || !activePolygon?.geometry) {
+      return
+    }
+
+    void zoomToAndHighlightGeometry(activePolygon.geometry)
+  }, [jimuMapView, activePolygon?.geometry])
+
+  useEffect(() => {
+    void applyApprovalFilter()
+  }, [showApproved, showRejected, polygonLayer, reviewTable])
+
+  async function applyApprovalFilter() {
+    if (!polygonLayer || !reviewTable) {
+      return
+    }
+
+    const approvalField = config.approvalField || 'APPROVAL_FLAG'
+    const tableJoinField = config.tableJoinField || 'Original_GlobalID'
+    const polygonJoinField = config.polygonJoinField || 'Original_GlobalID'
+
+    if (showApproved && showRejected) {
+      polygonLayer.definitionExpression = ''
+      return
+    }
+
+    if (!showApproved && !showRejected) {
+      polygonLayer.definitionExpression = '1 = 0'
+      clearSelectionBecauseOfFilter()
+      return
+    }
+
+    const approvalValues: string[] = []
+
+    if (showApproved) {
+      approvalValues.push('Approved')
+    }
+
+    if (showRejected) {
+      approvalValues.push('Rejected')
+    }
+
+    const valueClauses = approvalValues.map((value) => buildWhereClause(approvalField, value))
+    const tableQuery = reviewTable.createQuery()
+    tableQuery.where = valueClauses.join(' OR ')
+    tableQuery.outFields = [tableJoinField]
+    tableQuery.returnGeometry = false
+
+    try {
+      const tableResult = await reviewTable.queryFeatures(tableQuery)
+      const joinValues: string[] = []
+
+      for (const feature of tableResult.features) {
+        const joinValue = String(feature.attributes?.[tableJoinField] || '')
+        if (joinValue) {
+          joinValues.push(joinValue)
+        }
+      }
+
+      if (joinValues.length === 0) {
+        polygonLayer.definitionExpression = '1 = 0'
+        clearSelectionBecauseOfFilter()
+        return
+      }
+
+      const uniqueJoinValues = Array.from(new Set(joinValues))
+      const valueChunks = chunkValues(uniqueJoinValues, 200)
+      const chunkClauses = valueChunks.map((chunk) => `(${buildInClause(polygonJoinField, chunk)})`)
+
+      polygonLayer.definitionExpression = chunkClauses.join(' OR ')
+
+      if (activePolygon && !uniqueJoinValues.includes(activePolygon.joinValue)) {
+        clearSelectionBecauseOfFilter()
+      }
+    } catch (error) {
+      console.error(error)
+      setStatusType('error')
+      setStatusMessage('Failed to apply approved/rejected map filter.')
+    }
+  }
+
+  function clearSelectionBecauseOfFilter() {
+    setActivePolygon(null)
+    setActiveTableRecord(null)
+    setDecision('')
+    setRejectComments('')
+    setStatusType('info')
+    setStatusMessage('Current selection was cleared because it no longer matches the active filter.')
+
+    if (highlightGraphicRef.current && jimuMapView) {
+      jimuMapView.view.graphics.remove(highlightGraphicRef.current)
+      highlightGraphicRef.current = null
+    }
+  }
+
+  async function loadReviewTargetFromUrl(allotmentNumber: string, officeId: string) {
+    if (!polygonLayer) {
+      setStatusType('error')
+      setStatusMessage('Configure the polygon layer first.')
+      return
+    }
+
+    setIsLoading(true)
+    setStatusType('info')
+    setStatusMessage('Loading polygon from launch URL...')
+
+    try {
+      const polygonIdField = config.polygonIdField || 'ST_ALLOT'
+      const officeField = config.officeField || 'officeid'
+      const joinField = config.polygonJoinField || 'Original_GlobalID'
+
+      const polygonQuery = polygonLayer.createQuery()
+      polygonQuery.where = buildAndWhereClause(polygonIdField, allotmentNumber, officeField, officeId)
+      polygonQuery.returnGeometry = true
+      polygonQuery.outFields = ['*']
+
+      const polygonResult = await polygonLayer.queryFeatures(polygonQuery)
+      const polygonFeature = polygonResult.features[0]
+
+      if (!polygonFeature) {
+        setActivePolygon(null)
+        setActiveTableRecord(null)
+        setDecision('')
+        setRejectComments('')
+        setStatusType('error')
+        setStatusMessage('No polygon matched the launch URL parameters.')
+        return
+      }
+
+      const polygonAttributes = polygonFeature.attributes || {}
+      const joinValue = String(polygonAttributes[joinField] || '')
+
+      if (!joinValue) {
+        setStatusType('error')
+        setStatusMessage('Polygon found, but Original_GlobalID is missing.')
+        return
+      }
+
+      await loadReviewTargetFromPolygon({
+        objectId: String(polygonAttributes.OBJECTID || ''),
+        allotmentNumber: String(polygonAttributes[polygonIdField] || allotmentNumber),
+        officeId: String(polygonAttributes[officeField] || officeId),
+        officeName: String(polygonAttributes.OFFICE || ''),
+        joinValue: joinValue,
+        geometry: polygonFeature.geometry
+      })
+    } catch (error) {
+      console.error(error)
+      setStatusType('error')
+      setStatusMessage('Failed to load the polygon from the launch URL.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function loadReviewTargetFromPolygon(polygon: PolygonSummary) {
+    if (!reviewTable) {
+      setStatusType('error')
+      setStatusMessage('Configure the review table first.')
+      return
+    }
+
+    setIsLoading(true)
+    setStatusType('info')
+    setStatusMessage('Loading review record...')
+
+    try {
+      setActivePolygon(polygon)
+
+      const tableJoinField = config.tableJoinField || 'Original_GlobalID'
+      const approvalField = config.approvalField || 'APPROVAL_FLAG'
+      const commentsField = config.commentsField || 'Comments'
+
+      const tableQuery = reviewTable.createQuery()
+      tableQuery.where = buildWhereClause(tableJoinField, polygon.joinValue)
+      tableQuery.outFields = ['*']
+      tableQuery.returnGeometry = false
+
+      const tableResult = await reviewTable.queryFeatures(tableQuery)
+      const tableFeature = tableResult.features[0]
+
+      if (!tableFeature) {
+        setActiveTableRecord(null)
+        setDecision('')
+        setRejectComments('')
+        setStatusType('error')
+        setStatusMessage('Polygon found, but no related table record was found.')
+        return
+      }
+
+      const tableAttributes = tableFeature.attributes || {}
+      const existingDecision = String(tableAttributes[approvalField] || '')
+      const existingComments = String(tableAttributes[commentsField] || '')
+
+      setActiveTableRecord({
+        objectId: String(tableAttributes.OBJECTID || ''),
+        decision: existingDecision,
+        comments: existingComments,
+        joinValue: String(tableAttributes[tableJoinField] || '')
+      })
+
+      if (existingDecision === 'Approved' || existingDecision === 'Rejected') {
+        setDecision(existingDecision)
+      } else {
+        setDecision('')
+      }
+
+      setRejectComments(existingComments)
+      setStatusType('success')
+      setStatusMessage('Review target loaded.')
+    } catch (error) {
+      console.error(error)
+      setStatusType('error')
+      setStatusMessage('Failed to load the related review record.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function zoomToAndHighlightGeometry(geometry: __esri.Geometry) {
+    if (!jimuMapView) {
+      return
+    }
+
+    try {
+      if (highlightGraphicRef.current) {
+        jimuMapView.view.graphics.remove(highlightGraphicRef.current)
+      }
+
+      const highlightGraphic = createHighlightGraphic(geometry)
+      highlightGraphicRef.current = highlightGraphic
+      jimuMapView.view.graphics.add(highlightGraphic)
+      await jimuMapView.view.goTo(geometry)
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  function startSubmitDecision() {
+    if (!reviewTable || !activeTableRecord) {
+      setStatusType('error')
+      setStatusMessage('No review table record is ready to update.')
+      return
+    }
+
+    if (!decision) {
+      setStatusType('error')
+      setStatusMessage('Select Approved or Rejected first.')
+      return
+    }
+
+    if (decision === 'Rejected' && !rejectComments.trim()) {
+      setStatusType('error')
+      setStatusMessage('Enter a rejection reason before saving.')
+      return
+    }
+
+    setShowConfirmModal(true)
+  }
+
+  async function submitDecision() {
+    if (!reviewTable || !activeTableRecord) {
+      setStatusType('error')
+      setStatusMessage('No review table record is ready to update.')
+      setShowConfirmModal(false)
+      return
+    }
+
+    setIsLoading(true)
+    setStatusType('info')
+    setStatusMessage('Saving review decision...')
+
+    try {
+      const approvalField = config.approvalField || 'APPROVAL_FLAG'
+      const commentsField = config.commentsField || 'Comments'
+
+      const updateFeature = {
+        attributes: {
+          OBJECTID: Number(activeTableRecord.objectId),
+          [approvalField]: decision,
+          [commentsField]: decision === 'Rejected' ? rejectComments : ''
+        }
+      }
+
+      const editResult = await reviewTable.applyEdits({
+        updateFeatures: [updateFeature]
+      })
+
+      const updateResult = editResult.updateFeatureResults && editResult.updateFeatureResults[0]
+      if (updateResult && updateResult.success) {
+        setActiveTableRecord({
+          ...activeTableRecord,
+          decision: decision,
+          comments: decision === 'Rejected' ? rejectComments : ''
+        })
+        setStatusType('success')
+        setStatusMessage('Review decision saved successfully.')
+        await applyApprovalFilter()
+      } else {
+        setStatusType('error')
+        setStatusMessage('The review decision could not be saved.')
+      }
+    } catch (error) {
+      console.error(error)
+      setStatusType('error')
+      setStatusMessage('Failed to save the review decision.')
+    } finally {
+      setIsLoading(false)
+      setShowConfirmModal(false)
+    }
+  }
+
+  function handleClose() {
+    window.history.back()
+  }
 
   return (
-    <div className="widget-demo jimu-widget m-2">
-      {/* <JimuMapViewComponent useMapWidgetId={this.props.useMapWidgetIds?.[0]} onActiveViewChange={activeViewChangeHandler} /> */}
-        <div className='reviewer-div' style={{ color: 'white' }}>
-            <div>
-              <div className='reviewer-container'>
-                <h6>Data Review Paleo / Science GIS</h6>
-                <div>
-                  <label>
-                    Authorization Code:
-                  </label><br></br>
-                  { appNumber }
-                  <br></br>
-                </div>
-                <div>
-                  <label>
-                    Authorization Name:
-                  </label><br></br>
-                  { appName }
-                  <br></br>
-                </div>
-                <div>
-                  <label>
-                    { appMessage }
-                  </label><br></br>
-                  { records }
-                  <br></br>
-                </div>
-              </div>
-            </div>
-          </div>
-      <div className='d-flex justify-content-around'>
-        <div style={{ paddingTop: '10px' }}>
-          { <Button color='primary' onClick={toggleAcceptModal}>Accept Data</Button> }
-          { <Button color="primary" onClick={toggleRejectModal}>Reject Data</Button> }
-          <Button color="primary" onClick={handleClose}>Close</Button>
+    <div className='widget-demo jimu-widget m-2 ras-review-widget'>
+      <JimuMapViewComponent
+        useMapWidgetId={useMapWidgetIds?.[0]}
+        onActiveViewChange={(view) => setJimuMapView(view || null)}
+      />
+
+      <div className='reviewer-container'>
+        <h3>RAS Data Review</h3>
+
+        <div className='reviewer-section'>
+          <label><strong>Map Filter</strong></label>
+          <label className='checkbox-row'>
+            <input
+              type='checkbox'
+              checked={showApproved}
+              onChange={(event) => setShowApproved(event.target.checked)}
+            />
+            <span>Show Approved</span>
+          </label>
+          <label className='checkbox-row'>
+            <input
+              type='checkbox'
+              checked={showRejected}
+              onChange={(event) => setShowRejected(event.target.checked)}
+            />
+            <span>Show Rejected</span>
+          </label>
+        </div>
+
+        <div className='reviewer-section'>
+          <div><strong>Allotment:</strong> {activePolygon?.allotmentNumber || urlState.allotmentNumber || 'Not set'}</div>
+          <div><strong>Office ID:</strong> {activePolygon?.officeId || urlState.officeId || 'Not set'}</div>
+          <div><strong>Office:</strong> {activePolygon?.officeName || 'Not set'}</div>
+        </div>
+
+        <div className='reviewer-section'>
+          <div><strong>Approval Mode:</strong> {getApprovalModeLabel(activeTableRecord?.decision || '')}</div>
+        </div>
+
+        <div className='reviewer-section'>
+          <label htmlFor='review-decision'><strong>New Decision</strong></label>
+          <select
+            id='review-decision'
+            className='review-select'
+            value={decision}
+            onChange={(event) => setDecision(event.target.value as ReviewDecision)}
+          >
+            <option value=''>Select a decision</option>
+            <option value='Approved'>Approved</option>
+            <option value='Rejected'>Rejected</option>
+          </select>
+
+          {decision === 'Rejected' ? (
+            <>
+              <label htmlFor='reject-comments'><strong>Reject Reason</strong></label>
+              <textarea
+                id='reject-comments'
+                className='review-textarea'
+                value={rejectComments}
+                onChange={(event) => setRejectComments(event.target.value)}
+                rows={4}
+                placeholder='Enter the reason for rejection'
+              />
+            </>
+          ) : null}
+        </div>
+
+        <div className='reviewer-section'>
+          <div><strong>Current Comments:</strong> {activeTableRecord?.comments || 'None'}</div>
+          <div className={`status-text ${statusType}`}>{statusMessage}</div>
+        </div>
+
+        <div className='button-row'>
+          <button className='review-button' onClick={startSubmitDecision} disabled={isLoading}>
+            {isLoading ? 'Working...' : 'Submit Review'}
+          </button>
+          <button className='review-button secondary' onClick={handleClose}>
+            Close
+          </button>
         </div>
       </div>
-      <AcceptModal isOpen={isAccept} toggle={toggleAcceptModal} acceptWorkflow = {acceptWorkflow} />
-      <RejectModal isOpen={isReject} toggle= {toggleRejectModal} rejectWorkflow={rejectWorkflow} />
+
+      <ConfirmModal
+        isOpen={showConfirmModal}
+        title={decision === 'Rejected' ? 'Confirm rejection' : 'Confirm approval'}
+        message={decision === 'Rejected'
+          ? `Are you sure you want to reject this record? Reason: ${rejectComments}`
+          : 'Are you sure you want to approve this record?'}
+        onConfirm={submitDecision}
+        onCancel={() => setShowConfirmModal(false)}
+      />
     </div>
   )
 }

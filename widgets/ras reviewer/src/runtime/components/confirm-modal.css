@@ -1,0 +1,24 @@
+.confirm-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.confirm-modal-card {
+  width: min(420px, 90vw);
+  background: #1f1f1f;
+  color: white;
+  border-radius: 8px;
+  padding: 18px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.confirm-modal-buttons {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
