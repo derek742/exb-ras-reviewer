@@ -31,13 +31,19 @@ type TableRecordSummary = {
   joinValue: string
 }
 
+function logDebug(label: string, value?: unknown) {
+  console.log(`[RAS Reviewer] ${label}`, value)
+}
+
 function readUrlState(): UrlState {
   const params = new URLSearchParams(window.location.search)
-
-  return {
-    allotmentNumber: params.get('allotmentNR') || '',
-    officeId: params.get('officeid') || ''
+  const urlState = {
+    allotmentNumber: params.get('allotmentNr') || '',
+    officeId: params.get('officeId') || ''
   }
+
+  logDebug('Read URL params', urlState)
+  return urlState
 }
 
 function buildWhereClause(fieldName: string, value: string): string {
@@ -63,6 +69,7 @@ function createHighlightGraphic(geometry: __esri.Geometry): Graphic {
 }
 
 function createFeatureLayer(url: string): FeatureLayer {
+  logDebug('Creating fallback feature layer', url)
   return new FeatureLayer({
     url: url,
     outFields: ['*']
@@ -81,6 +88,8 @@ function findLayerByTitle(map: __esri.Map, title: string): FeatureLayer | null {
   let matchedLayer: FeatureLayer | null = null
 
   map.layers.forEach((layer) => {
+    logDebug('Inspecting map layer', { title: layer.title, type: layer.type, url: (layer as FeatureLayer).url })
+
     if (matchedLayer) {
       return
     }
@@ -90,6 +99,7 @@ function findLayerByTitle(map: __esri.Map, title: string): FeatureLayer | null {
     }
   })
 
+  logDebug('Matched polygon layer by title', matchedLayer ? { title: matchedLayer.title, url: matchedLayer.url } : null)
   return matchedLayer
 }
 
@@ -101,6 +111,8 @@ function findTableByTitle(map: __esri.Map, title: string): FeatureLayer | null {
   let matchedTable: FeatureLayer | null = null
 
   map.tables.forEach((table) => {
+    logDebug('Inspecting map table', { title: table.title, type: table.type, url: (table as FeatureLayer).url })
+
     if (matchedTable) {
       return
     }
@@ -110,6 +122,7 @@ function findTableByTitle(map: __esri.Map, title: string): FeatureLayer | null {
     }
   })
 
+  logDebug('Matched review table by title', matchedTable ? { title: matchedTable.title, url: matchedTable.url } : null)
   return matchedTable
 }
 
@@ -160,11 +173,19 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
   const highlightGraphicRef = useRef<Graphic | null>(null)
 
   useEffect(() => {
+    logDebug('Initial URL state effect fired')
     setUrlState(readUrlState())
   }, [])
 
   useEffect(() => {
+    logDebug('Data source setup effect fired', {
+      hasMapView: Boolean(jimuMapView),
+      polygonLayerTitle: config.polygonLayerTitle,
+      reviewTableTitle: config.reviewTableTitle
+    })
+
     if (!jimuMapView) {
+      logDebug('Skipping data source setup because map view is not ready')
       return
     }
 
@@ -176,14 +197,23 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       setStatusMessage('Waiting for map and data sources...')
 
       try {
+        logDebug('Waiting for jimuMapView.view.when()')
         await jimuMapView.view.when()
+        logDebug('Map view is ready')
+
+        logDebug('Waiting for map.load()')
         await jimuMapView.view.map.load()
+        logDebug('Map is loaded')
 
         if (cancelled) {
+          logDebug('Setup cancelled before resolving layers')
           return
         }
 
         const map = jimuMapView.view.map
+        logDebug('Map layer count', map.layers.length)
+        logDebug('Map table count', map.tables ? map.tables.length : 0)
+
         const matchedPolygonLayer = findLayerByTitle(map, config.polygonLayerTitle || '')
         const matchedReviewTable = findTableByTitle(map, config.reviewTableTitle || '')
 
@@ -203,8 +233,12 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         }
 
         if (cancelled) {
+          logDebug('Setup cancelled after resolving layers')
           return
         }
+
+        logDebug('Resolved polygon layer', resolvedPolygonLayer ? { title: resolvedPolygonLayer.title, url: resolvedPolygonLayer.url } : null)
+        logDebug('Resolved review table', resolvedReviewTable ? { title: resolvedReviewTable.title, url: resolvedReviewTable.url } : null)
 
         setPolygonLayer(resolvedPolygonLayer)
         setReviewTable(resolvedReviewTable)
@@ -213,15 +247,18 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
           setIsDataReady(true)
           setStatusType('info')
           setStatusMessage('Map and data sources are ready.')
+          logDebug('Data sources are ready')
         } else {
           setStatusType('error')
           setStatusMessage('Could not resolve the polygon layer or review table.')
+          logDebug('Failed to resolve one or more data sources')
         }
       } catch (error) {
         console.error(error)
         if (!cancelled) {
           setStatusType('error')
           setStatusMessage('Failed to initialize the map and data sources.')
+          logDebug('Data source setup failed', error)
         }
       }
     }
@@ -230,15 +267,23 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
 
     return () => {
       cancelled = true
+      logDebug('Cleaning up data source setup effect')
     }
   }, [jimuMapView, config])
 
   useEffect(() => {
+    logDebug('URL launch effect fired', {
+      isDataReady,
+      allotmentNumber: urlState.allotmentNumber,
+      officeId: urlState.officeId
+    })
+
     if (!isDataReady) {
       return
     }
 
     if (!urlState.allotmentNumber || !urlState.officeId) {
+      logDebug('Skipping URL launch because required params are missing')
       return
     }
 
@@ -246,6 +291,12 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
   }, [isDataReady, urlState.allotmentNumber, urlState.officeId])
 
   useEffect(() => {
+    logDebug('Map click binding effect fired', {
+      isDataReady,
+      hasMapView: Boolean(jimuMapView),
+      hasPolygonLayer: Boolean(polygonLayer)
+    })
+
     if (!isDataReady || !jimuMapView || !polygonLayer) {
       return
     }
@@ -256,12 +307,16 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     })
 
     if (!alreadyInMap && config.polygonLayerUrl && polygonLayer.url === config.polygonLayerUrl) {
+      logDebug('Adding fallback polygon layer to map', polygonLayer.url)
       map.add(polygonLayer)
     }
 
     const clickHandle = jimuMapView.view.on('click', async (event) => {
+      logDebug('Map clicked')
+
       try {
         const hitResponse = await jimuMapView.view.hitTest(event)
+        logDebug('Hit test result count', hitResponse.results.length)
         let graphic = null
 
         for (const result of hitResponse.results) {
@@ -274,6 +329,14 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
           const sameTitle = hitLayer.title === polygonLayer.title
           const sameUrl = hitLayer.url === polygonLayer.url
 
+          logDebug('Inspecting hit graphic layer', {
+            hitTitle: hitLayer.title,
+            hitUrl: hitLayer.url,
+            sameInstance,
+            sameTitle,
+            sameUrl
+          })
+
           if (sameInstance || sameTitle || sameUrl) {
             graphic = result.graphic
             break
@@ -281,6 +344,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         }
 
         if (!graphic) {
+          logDebug('No matching polygon graphic found in hit test')
           return
         }
 
@@ -294,7 +358,15 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         const joinValue = String(attributes[joinFieldName] || '')
         const allotmentName = String(attributes.ALLOT_NAME || '')
 
+        logDebug('Resolved clicked polygon attributes', {
+          allotmentNumber,
+          officeId,
+          joinValue,
+          allotmentName
+        })
+
         if (!allotmentNumber || !joinValue) {
+          logDebug('Clicked polygon is missing allotment number or join value')
           return
         }
 
@@ -308,11 +380,13 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         })
       } catch (error) {
         console.error(error)
+        logDebug('Map click handler failed', error)
       }
     })
 
     return () => {
       clickHandle.remove()
+      logDebug('Removed map click handler')
     }
   }, [isDataReady, jimuMapView, polygonLayer, config])
 
@@ -325,6 +399,14 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
   }, [isDataReady, jimuMapView, activePolygon?.geometry])
 
   useEffect(() => {
+    logDebug('Approval filter effect fired', {
+      isDataReady,
+      showApproved,
+      showRejected,
+      hasPolygonLayer: Boolean(polygonLayer),
+      hasReviewTable: Boolean(reviewTable)
+    })
+
     if (!isDataReady) {
       return
     }
@@ -341,13 +423,23 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     const tableJoinField = config.tableJoinField || 'Original_GlobalID'
     const polygonJoinField = config.polygonJoinField || 'Original_GlobalID'
 
+    logDebug('Applying approval filter', {
+      approvalField,
+      tableJoinField,
+      polygonJoinField,
+      showApproved,
+      showRejected
+    })
+
     if (showApproved && showRejected) {
       polygonLayer.definitionExpression = ''
+      logDebug('Showing all polygons, cleared definitionExpression')
       return
     }
 
     if (!showApproved && !showRejected) {
       polygonLayer.definitionExpression = '1 = 0'
+      logDebug('Showing no polygons')
       clearSelectionBecauseOfFilter()
       return
     }
@@ -379,6 +471,8 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         }
       }
 
+      logDebug('Approval filter matched join values', joinValues)
+
       if (joinValues.length === 0) {
         polygonLayer.definitionExpression = '1 = 0'
         clearSelectionBecauseOfFilter()
@@ -390,6 +484,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       const chunkClauses = valueChunks.map((chunk) => `(${buildInClause(polygonJoinField, chunk)})`)
 
       polygonLayer.definitionExpression = chunkClauses.join(' OR ')
+      logDebug('Applied polygon definitionExpression', polygonLayer.definitionExpression)
 
       if (activePolygon && !uniqueJoinValues.includes(activePolygon.joinValue)) {
         clearSelectionBecauseOfFilter()
@@ -398,10 +493,12 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       console.error(error)
       setStatusType('error')
       setStatusMessage('Failed to apply approved/rejected map filter.')
+      logDebug('Approval filter failed', error)
     }
   }
 
   function clearSelectionBecauseOfFilter() {
+    logDebug('Clearing selection because of active filter')
     setActivePolygon(null)
     setActiveTableRecord(null)
     setDecision('')
@@ -425,6 +522,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     setIsLoading(true)
     setStatusType('info')
     setStatusMessage('Loading polygon from launch URL...')
+    logDebug('Loading review target from URL', { allotmentNumber, officeId })
 
     try {
       const polygonIdField = config.polygonIdField || 'ST_ALLOT'
@@ -435,9 +533,11 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       polygonQuery.where = buildAndWhereClause(polygonIdField, allotmentNumber, officeField, officeId)
       polygonQuery.returnGeometry = true
       polygonQuery.outFields = ['*']
+      logDebug('Polygon query from URL', polygonQuery.where)
 
       const polygonResult = await polygonLayer.queryFeatures(polygonQuery)
       const polygonFeature = polygonResult.features[0]
+      logDebug('Polygon query result count', polygonResult.features.length)
 
       if (!polygonFeature) {
         setActivePolygon(null)
@@ -470,6 +570,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       console.error(error)
       setStatusType('error')
       setStatusMessage('Failed to load the polygon from the launch URL.')
+      logDebug('URL launch load failed', error)
     } finally {
       setIsLoading(false)
     }
@@ -485,6 +586,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     setIsLoading(true)
     setStatusType('info')
     setStatusMessage('Loading review record...')
+    logDebug('Loading review target from polygon', polygon)
 
     try {
       setActivePolygon(polygon)
@@ -497,9 +599,11 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       tableQuery.where = buildWhereClause(tableJoinField, polygon.joinValue)
       tableQuery.outFields = ['*']
       tableQuery.returnGeometry = false
+      logDebug('Related table query', tableQuery.where)
 
       const tableResult = await reviewTable.queryFeatures(tableQuery)
       const tableFeature = tableResult.features[0]
+      logDebug('Related table query result count', tableResult.features.length)
 
       if (!tableFeature) {
         setActiveTableRecord(null)
@@ -530,10 +634,16 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       setRejectComments(existingComments)
       setStatusType('success')
       setStatusMessage('Review target loaded.')
+      logDebug('Loaded related table record', {
+        objectId: tableAttributes.OBJECTID,
+        existingDecision,
+        existingComments
+      })
     } catch (error) {
       console.error(error)
       setStatusType('error')
       setStatusMessage('Failed to load the related review record.')
+      logDebug('Related table load failed', error)
     } finally {
       setIsLoading(false)
     }
@@ -553,12 +663,16 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       highlightGraphicRef.current = highlightGraphic
       jimuMapView.view.graphics.add(highlightGraphic)
       await jimuMapView.view.goTo(geometry)
+      logDebug('Zoomed to and highlighted geometry')
     } catch (error) {
       console.error(error)
+      logDebug('Zoom/highlight failed', error)
     }
   }
 
   function startSubmitDecision() {
+    logDebug('Submit review clicked', { decision, rejectComments })
+
     if (!reviewTable || !activeTableRecord) {
       setStatusType('error')
       setStatusMessage('No review table record is ready to update.')
@@ -591,6 +705,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     setIsLoading(true)
     setStatusType('info')
     setStatusMessage('Saving review decision...')
+    logDebug('Saving review decision', { decision, rejectComments, tableRecord: activeTableRecord })
 
     try {
       const approvalField = config.approvalField || 'APPROVAL_FLAG'
@@ -609,6 +724,8 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       })
 
       const updateResult = editResult.updateFeatureResults && editResult.updateFeatureResults[0]
+      logDebug('applyEdits result', editResult)
+
       if (updateResult && updateResult.success) {
         setActiveTableRecord({
           ...activeTableRecord,
@@ -626,6 +743,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       console.error(error)
       setStatusType('error')
       setStatusMessage('Failed to save the review decision.')
+      logDebug('applyEdits failed', error)
     } finally {
       setIsLoading(false)
       setShowConfirmModal(false)
@@ -640,7 +758,10 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     <div className='widget-demo jimu-widget m-2 ras-review-widget'>
       <JimuMapViewComponent
         useMapWidgetId={useMapWidgetIds?.[0]}
-        onActiveViewChange={(view) => setJimuMapView(view || null)}
+        onActiveViewChange={(view) => {
+          logDebug('Active map view changed', view ? 'received' : 'null')
+          setJimuMapView(view || null)
+        }}
       />
 
       <div className='reviewer-container'>
