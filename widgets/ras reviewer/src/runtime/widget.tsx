@@ -152,6 +152,12 @@ function getApprovalModeLabel(value: string): string {
 const Widget = (props: AllWidgetProps<IMConfig>) => {
   const { config, useMapWidgetIds } = props
 
+  logDebug('Render state', {
+    useMapWidgetIds,
+    polygonLayerTitle: config.polygonLayerTitle,
+    reviewTableTitle: config.reviewTableTitle
+  })
+
   const [urlState, setUrlState] = useState<UrlState>({
     allotmentNumber: '',
     officeId: ''
@@ -759,7 +765,10 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       <JimuMapViewComponent
         useMapWidgetId={useMapWidgetIds?.[0]}
         onActiveViewChange={(view) => {
-          logDebug('Active map view changed', view ? 'received' : 'null')
+          logDebug('Active map view changed', {
+            hasView: Boolean(view),
+            useMapWidgetId: useMapWidgetIds?.[0] || null
+          })
           setJimuMapView(view || null)
         }}
       />
