@@ -19,7 +19,7 @@ type PolygonSummary = {
   objectId: string
   allotmentNumber: string
   officeId: string
-  officeName: string
+  allotmentName: string
   joinValue: string
   geometry?: __esri.Geometry
 }
@@ -156,6 +156,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
   const [jimuMapView, setJimuMapView] = useState<JimuMapView | null>(null)
   const [polygonLayer, setPolygonLayer] = useState<FeatureLayer | null>(null)
   const [reviewTable, setReviewTable] = useState<FeatureLayer | null>(null)
+  const [isDataReady, setIsDataReady] = useState(false)
   const highlightGraphicRef = useRef<Graphic | null>(null)
 
   useEffect(() => {
@@ -167,37 +168,85 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       return
     }
 
-    const map = jimuMapView.view.map
-    const matchedPolygonLayer = findLayerByTitle(map, config.polygonLayerTitle || '')
-    const matchedReviewTable = findTableByTitle(map, config.reviewTableTitle || '')
+    let cancelled = false
 
-    if (matchedPolygonLayer) {
-      setPolygonLayer(matchedPolygonLayer)
-    } else if (config.polygonLayerUrl) {
-      setPolygonLayer(createFeatureLayer(config.polygonLayerUrl))
-    } else {
-      setPolygonLayer(null)
+    async function setupDataSources() {
+      setIsDataReady(false)
+      setStatusType('info')
+      setStatusMessage('Waiting for map and data sources...')
+
+      try {
+        await jimuMapView.view.when()
+        await jimuMapView.view.map.load()
+
+        if (cancelled) {
+          return
+        }
+
+        const map = jimuMapView.view.map
+        const matchedPolygonLayer = findLayerByTitle(map, config.polygonLayerTitle || '')
+        const matchedReviewTable = findTableByTitle(map, config.reviewTableTitle || '')
+
+        let resolvedPolygonLayer: FeatureLayer | null = null
+        let resolvedReviewTable: FeatureLayer | null = null
+
+        if (matchedPolygonLayer) {
+          resolvedPolygonLayer = matchedPolygonLayer
+        } else if (config.polygonLayerUrl) {
+          resolvedPolygonLayer = createFeatureLayer(config.polygonLayerUrl)
+        }
+
+        if (matchedReviewTable) {
+          resolvedReviewTable = matchedReviewTable
+        } else if (config.reviewTableUrl) {
+          resolvedReviewTable = createFeatureLayer(config.reviewTableUrl)
+        }
+
+        if (cancelled) {
+          return
+        }
+
+        setPolygonLayer(resolvedPolygonLayer)
+        setReviewTable(resolvedReviewTable)
+
+        if (resolvedPolygonLayer && resolvedReviewTable) {
+          setIsDataReady(true)
+          setStatusType('info')
+          setStatusMessage('Map and data sources are ready.')
+        } else {
+          setStatusType('error')
+          setStatusMessage('Could not resolve the polygon layer or review table.')
+        }
+      } catch (error) {
+        console.error(error)
+        if (!cancelled) {
+          setStatusType('error')
+          setStatusMessage('Failed to initialize the map and data sources.')
+        }
+      }
     }
 
-    if (matchedReviewTable) {
-      setReviewTable(matchedReviewTable)
-    } else if (config.reviewTableUrl) {
-      setReviewTable(createFeatureLayer(config.reviewTableUrl))
-    } else {
-      setReviewTable(null)
+    void setupDataSources()
+
+    return () => {
+      cancelled = true
     }
   }, [jimuMapView, config])
 
   useEffect(() => {
+    if (!isDataReady) {
+      return
+    }
+
     if (!urlState.allotmentNumber || !urlState.officeId) {
       return
     }
 
     void loadReviewTargetFromUrl(urlState.allotmentNumber, urlState.officeId)
-  }, [urlState.allotmentNumber, urlState.officeId, polygonLayer, reviewTable])
+  }, [isDataReady, urlState.allotmentNumber, urlState.officeId])
 
   useEffect(() => {
-    if (!jimuMapView || !polygonLayer) {
+    if (!isDataReady || !jimuMapView || !polygonLayer) {
       return
     }
 
@@ -216,7 +265,16 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         let graphic = null
 
         for (const result of hitResponse.results) {
-          if (result.graphic?.layer === polygonLayer) {
+          const hitLayer = result.graphic?.layer as FeatureLayer | undefined
+          if (!hitLayer || !polygonLayer) {
+            continue
+          }
+
+          const sameInstance = hitLayer === polygonLayer
+          const sameTitle = hitLayer.title === polygonLayer.title
+          const sameUrl = hitLayer.url === polygonLayer.url
+
+          if (sameInstance || sameTitle || sameUrl) {
             graphic = result.graphic
             break
           }
@@ -234,7 +292,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         const allotmentNumber = String(attributes[polygonFieldName] || '')
         const officeId = String(attributes[officeFieldName] || '')
         const joinValue = String(attributes[joinFieldName] || '')
-        const officeName = String(attributes.OFFICE || '')
+        const allotmentName = String(attributes.ALLOT_NAME || '')
 
         if (!allotmentNumber || !joinValue) {
           return
@@ -244,7 +302,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
           objectId: String(attributes.OBJECTID || ''),
           allotmentNumber: allotmentNumber,
           officeId: officeId,
-          officeName: officeName,
+          allotmentName: allotmentName,
           joinValue: joinValue,
           geometry: graphic.geometry
         })
@@ -256,19 +314,23 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     return () => {
       clickHandle.remove()
     }
-  }, [jimuMapView, polygonLayer, config])
+  }, [isDataReady, jimuMapView, polygonLayer, config])
 
   useEffect(() => {
-    if (!jimuMapView || !activePolygon?.geometry) {
+    if (!isDataReady || !jimuMapView || !activePolygon?.geometry) {
       return
     }
 
     void zoomToAndHighlightGeometry(activePolygon.geometry)
-  }, [jimuMapView, activePolygon?.geometry])
+  }, [isDataReady, jimuMapView, activePolygon?.geometry])
 
   useEffect(() => {
+    if (!isDataReady) {
+      return
+    }
+
     void applyApprovalFilter()
-  }, [showApproved, showRejected, polygonLayer, reviewTable])
+  }, [isDataReady, showApproved, showRejected, polygonLayer, reviewTable])
 
   async function applyApprovalFilter() {
     if (!polygonLayer || !reviewTable) {
@@ -400,7 +462,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         objectId: String(polygonAttributes.OBJECTID || ''),
         allotmentNumber: String(polygonAttributes[polygonIdField] || allotmentNumber),
         officeId: String(polygonAttributes[officeField] || officeId),
-        officeName: String(polygonAttributes.OFFICE || ''),
+        allotmentName: String(polygonAttributes.ALLOT_NAME || ''),
         joinValue: joinValue,
         geometry: polygonFeature.geometry
       })
@@ -607,7 +669,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         <div className='reviewer-section'>
           <div><strong>Allotment:</strong> {activePolygon?.allotmentNumber || urlState.allotmentNumber || 'Not set'}</div>
           <div><strong>Office ID:</strong> {activePolygon?.officeId || urlState.officeId || 'Not set'}</div>
-          <div><strong>Office:</strong> {activePolygon?.officeName || 'Not set'}</div>
+          <div><strong>Allotment Name:</strong> {activePolygon?.allotmentName || 'Not set'}</div>
         </div>
 
         <div className='reviewer-section'>
@@ -648,7 +710,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         </div>
 
         <div className='button-row'>
-          <button className='review-button' onClick={startSubmitDecision} disabled={isLoading}>
+          <button className='review-button' onClick={startSubmitDecision} disabled={isLoading || !isDataReady}>
             {isLoading ? 'Working...' : 'Submit Review'}
           </button>
           <button className='review-button secondary' onClick={handleClose}>
