@@ -47,8 +47,8 @@ function buildWhereClause(fieldName: string, value: string): string {
   return `${fieldName} = '${safeValue}'`
 }
 
-function buildAndWhereClause(firstField: string, firstValue: string, secondField: string, secondValue: string): string {
-  return `${buildWhereClause(firstField, firstValue)} AND ${buildWhereClause(secondField, secondValue)}`
+function buildAndWhereClause(firstField: string, firstValue: string): string {
+  return buildWhereClause(firstField, firstValue)
 }
 
 function createHighlightGraphic(geometry: __esri.Geometry): Graphic {
@@ -449,7 +449,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       const joinField = config.polygonJoinField || 'Original_GlobalID'
 
       const polygonQuery = polygonLayer.createQuery()
-      polygonQuery.where = buildAndWhereClause(polygonIdField, allotmentNumber, officeField, officeId)
+      polygonQuery.where = buildAndWhereClause(polygonIdField, allotmentNumber)
       polygonQuery.returnGeometry = true
       polygonQuery.outFields = ['*']
       console.log('[RAS Reviewer] Polygon query', polygonQuery.where)
@@ -637,7 +637,10 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
 
       console.log('[RAS Reviewer] applyEdits result', editResult)
       const updateResult = editResult.updateFeatureResults && editResult.updateFeatureResults[0]
-      if (updateResult && updateResult.success) {
+      const hasEditError = Boolean(updateResult?.error)
+      const editSucceeded = Boolean(updateResult) && !hasEditError
+
+      if (editSucceeded) {
         setActiveTableRecord({
           ...activeTableRecord,
           decision: decision,
