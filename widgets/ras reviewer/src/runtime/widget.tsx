@@ -29,6 +29,7 @@ type TableRecordSummary = {
   decision: string
   comments: string
   joinValue: string
+  lastEditedUser: string
 }
 
 function readUrlState(): UrlState {
@@ -540,7 +541,8 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         objectId: String(tableAttributes.OBJECTID || ''),
         decision: existingDecision,
         comments: existingComments,
-        joinValue: String(tableAttributes[tableJoinField] || '')
+        joinValue: String(tableAttributes[tableJoinField] || ''),
+        lastEditedUser: String(tableAttributes.last_edited_user || '')
       })
 
       if (existingDecision === 'Approved' || existingDecision === 'Rejected') {
@@ -558,6 +560,79 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       setStatusMessage('Failed to load the related review record.')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function reloadReviewTableRecord(joinValue: string): Promise<TableRecordSummary | null> {
+    if (!reviewTable) {
+      return null
+    }
+
+    const tableJoinField = config.tableJoinField || 'Original_GlobalID'
+    const approvalField = config.approvalField || 'APPROVAL_FLAG'
+    const commentsField = config.commentsField || 'Comments'
+
+    const tableQuery = reviewTable.createQuery()
+    tableQuery.where = buildWhereClause(tableJoinField, joinValue)
+    tableQuery.outFields = ['*']
+    tableQuery.returnGeometry = false
+
+    const tableResult = await reviewTable.queryFeatures(tableQuery)
+    const tableFeature = tableResult.features[0]
+
+    if (!tableFeature) {
+      return null
+    }
+
+    const tableAttributes = tableFeature.attributes || {}
+
+    return {
+      objectId: String(tableAttributes.OBJECTID || ''),
+      decision: String(tableAttributes[approvalField] || ''),
+      comments: String(tableAttributes[commentsField] || ''),
+      joinValue: String(tableAttributes[tableJoinField] || ''),
+      lastEditedUser: String(tableAttributes.last_edited_user || '')
+    }
+  }
+
+  async function sendRejectEmail(tableRecord: TableRecordSummary, polygon: PolygonSummary, rejectionReason: string) {
+    const recipient = tableRecord.lastEditedUser
+
+    if (!recipient) {
+      console.log('[RAS Reviewer] No last_edited_user found, skipping reject email')
+      return
+    }
+
+    const subject = `RAS review rejected for allotment ${polygon.allotmentNumber}`
+    const text = [
+      'Your RAS review submission was rejected.',
+      '',
+      `Allotment: ${polygon.allotmentNumber}`,
+      `Allotment Name: ${polygon.allotmentName || 'Not set'}`,
+      `Office ID: ${polygon.officeId || 'Not set'}`,
+      '',
+      'Reason:',
+      rejectionReason,
+      '',
+      'Please forward this to your GIS team member who can make the needed correction for the allotment polygon issue.'
+    ].join('\n')
+
+    const response = await fetch('http://localhost:8010/send-email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': 'change-me'
+      },
+      body: JSON.stringify({
+        to: [recipient],
+        subject,
+        text
+      })
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`Reject email failed: ${errorText}`)
     }
   }
 
@@ -641,13 +716,22 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       const editSucceeded = Boolean(updateResult) && !hasEditError
 
       if (editSucceeded) {
-        setActiveTableRecord({
-          ...activeTableRecord,
-          decision: decision,
-          comments: decision === 'Rejected' ? rejectComments : ''
-        })
+        const refreshedRecord = await reloadReviewTableRecord(activeTableRecord.joinValue)
+
+        if (refreshedRecord) {
+          setActiveTableRecord(refreshedRecord)
+        }
+
+        if (decision === 'Rejected' && refreshedRecord && activePolygon) {
+          await sendRejectEmail(refreshedRecord, activePolygon, rejectComments)
+        }
+
         setStatusType('success')
-        setStatusMessage('Review decision saved successfully.')
+        setStatusMessage(
+          decision === 'Rejected'
+            ? 'Review decision saved and rejection email sent successfully.'
+            : 'Review decision saved successfully.'
+        )
         await applyApprovalFilter()
       } else {
         setStatusType('error')
