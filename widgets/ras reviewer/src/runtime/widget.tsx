@@ -29,6 +29,7 @@ type TableRecordSummary = {
   decision: string
   comments: string
   joinValue: string
+  lastEditedUser: string
 }
 
 function readUrlState(): UrlState {
@@ -47,8 +48,8 @@ function buildWhereClause(fieldName: string, value: string): string {
   return `${fieldName} = '${safeValue}'`
 }
 
-function buildAndWhereClause(firstField: string, firstValue: string, secondField: string, secondValue: string): string {
-  return `${buildWhereClause(firstField, firstValue)} AND ${buildWhereClause(secondField, secondValue)}`
+function buildAndWhereClause(firstField: string, firstValue: string): string {
+  return buildWhereClause(firstField, firstValue)
 }
 
 function createHighlightGraphic(geometry: __esri.Geometry): Graphic {
@@ -130,6 +131,41 @@ function findTableByTitle(map: __esri.Map, title: string): FeatureLayer | null {
   return matchedTable
 }
 
+function findMapImageSublayerByTitle(map: __esri.Map, title: string): __esri.Sublayer | null {
+  if (!title) {
+    return null
+  }
+
+  let matchedSublayer: __esri.Sublayer | null = null
+
+  map.layers.forEach((layer) => {
+    if (matchedSublayer || layer.type !== 'map-image') {
+      return
+    }
+
+    const mapImageLayer = layer as __esri.MapImageLayer
+
+    mapImageLayer.sublayers.forEach((sublayer) => {
+      console.log('[RAS Reviewer] Inspecting map-image sublayer', {
+        title: sublayer.title,
+        id: sublayer.id,
+        parentUrl: mapImageLayer.url
+      })
+
+      if (matchedSublayer) {
+        return
+      }
+
+      if (sublayer.title === title) {
+        matchedSublayer = sublayer
+      }
+    })
+  })
+
+  console.log('[RAS Reviewer] Matched polygon display sublayer', matchedSublayer ? { title: matchedSublayer.title, id: matchedSublayer.id } : null)
+  return matchedSublayer
+}
+
 function chunkValues(values: string[], size: number): string[][] {
   const chunks: string[][] = []
 
@@ -171,7 +207,8 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
   const [showApproved, setShowApproved] = useState(true)
   const [showRejected, setShowRejected] = useState(true)
   const [jimuMapView, setJimuMapView] = useState<JimuMapView | null>(null)
-  const [polygonLayer, setPolygonLayer] = useState<FeatureLayer | null>(null)
+  const [queryPolygonLayer, setQueryPolygonLayer] = useState<FeatureLayer | null>(null)
+  const [displayPolygonSublayer, setDisplayPolygonSublayer] = useState<__esri.Sublayer | null>(null)
   const [reviewTable, setReviewTable] = useState<FeatureLayer | null>(null)
   const highlightGraphicRef = useRef<Graphic | null>(null)
 
@@ -193,21 +230,26 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     }
 
     const map = jimuMapView.view.map
-    const matchedPolygonLayer = findLayerByTitle(map, config.polygonLayerTitle || '')
+    const matchedDisplaySublayer = findMapImageSublayerByTitle(map, config.polygonLayerTitle || '')
     const matchedReviewTable = findTableByTitle(map, config.reviewTableTitle || '')
 
-    if (matchedPolygonLayer) {
-      console.log('[RAS Reviewer] Setting polygon layer from map', {
-        title: matchedPolygonLayer.title,
-        url: matchedPolygonLayer.url
+    if (matchedDisplaySublayer) {
+      console.log('[RAS Reviewer] Setting polygon display sublayer from map', {
+        title: matchedDisplaySublayer.title,
+        id: matchedDisplaySublayer.id
       })
-      setPolygonLayer(matchedPolygonLayer)
-    } else if (config.polygonLayerUrl) {
-      console.log('[RAS Reviewer] Setting polygon layer from fallback URL', config.polygonLayerUrl)
-      setPolygonLayer(createFeatureLayer(config.polygonLayerUrl))
+      setDisplayPolygonSublayer(matchedDisplaySublayer)
     } else {
-      console.log('[RAS Reviewer] No polygon layer resolved')
-      setPolygonLayer(null)
+      console.log('[RAS Reviewer] No polygon display sublayer resolved')
+      setDisplayPolygonSublayer(null)
+    }
+
+    if (config.polygonLayerUrl) {
+      console.log('[RAS Reviewer] Setting query polygon layer from URL', config.polygonLayerUrl)
+      setQueryPolygonLayer(createFeatureLayer(config.polygonLayerUrl))
+    } else {
+      console.log('[RAS Reviewer] No polygon query layer configured')
+      setQueryPolygonLayer(null)
     }
 
     if (matchedReviewTable) {
@@ -229,7 +271,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     console.log('[RAS Reviewer] URL launch effect fired', {
       allotmentNumber: urlState.allotmentNumber,
       officeId: urlState.officeId,
-      hasPolygonLayer: Boolean(polygonLayer),
+      hasPolygonLayer: Boolean(queryPolygonLayer),
       hasReviewTable: Boolean(reviewTable)
     })
 
@@ -238,76 +280,52 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     }
 
     void loadReviewTargetFromUrl(urlState.allotmentNumber, urlState.officeId)
-  }, [urlState.allotmentNumber, urlState.officeId, polygonLayer, reviewTable])
+  }, [urlState.allotmentNumber, urlState.officeId, queryPolygonLayer, reviewTable])
 
   useEffect(() => {
     console.log('[RAS Reviewer] Click binding effect fired', {
       hasMapView: Boolean(jimuMapView),
-      hasPolygonLayer: Boolean(polygonLayer)
+      hasPolygonLayer: Boolean(queryPolygonLayer)
     })
 
-    if (!jimuMapView || !polygonLayer) {
+    if (!jimuMapView || !queryPolygonLayer) {
       return
     }
 
-    const map = jimuMapView.view.map
-    const alreadyInMap = map.layers.some((layer) => {
-      return layer.type === 'feature' && (layer as FeatureLayer).url === polygonLayer.url
-    })
-
-    if (!alreadyInMap && config.polygonLayerUrl && polygonLayer.url === config.polygonLayerUrl) {
-      console.log('[RAS Reviewer] Adding fallback polygon layer to map', polygonLayer.url)
-      map.add(polygonLayer)
-    }
-
     const clickHandle = jimuMapView.view.on('click', async (event) => {
-      console.log('[RAS Reviewer] Map clicked')
+      console.log('[RAS Reviewer] Map clicked', event.mapPoint)
 
       try {
-        const hitResponse = await jimuMapView.view.hitTest(event)
-        console.log('[RAS Reviewer] Hit test result count', hitResponse.results.length)
-        let graphic = null
-
-        for (const result of hitResponse.results) {
-          const hitLayer = result.graphic?.layer as FeatureLayer | undefined
-          if (!hitLayer) {
-            continue
-          }
-
-          const sameInstance = hitLayer === polygonLayer
-          const sameTitle = hitLayer.title === polygonLayer.title
-          const sameUrl = hitLayer.url === polygonLayer.url
-
-          console.log('[RAS Reviewer] Inspecting hit layer', {
-            hitTitle: hitLayer.title,
-            hitUrl: hitLayer.url,
-            sameInstance,
-            sameTitle,
-            sameUrl
-          })
-
-          if (sameInstance || sameTitle || sameUrl) {
-            graphic = result.graphic
-            break
-          }
-        }
-
-        if (!graphic) {
-          console.log('[RAS Reviewer] No matching polygon graphic found')
+        if (!event.mapPoint) {
           return
         }
 
-        const attributes = graphic.attributes || {}
         const polygonFieldName = config.polygonIdField || 'ST_ALLOT'
         const officeFieldName = config.officeField || 'officeid'
         const joinFieldName = config.polygonJoinField || 'Original_GlobalID'
 
+        const clickQuery = queryPolygonLayer.createQuery()
+        clickQuery.geometry = event.mapPoint
+        clickQuery.spatialRelationship = 'intersects'
+        clickQuery.returnGeometry = true
+        clickQuery.outFields = ['*']
+
+        const clickResult = await queryPolygonLayer.queryFeatures(clickQuery)
+        console.log('[RAS Reviewer] Click query result count', clickResult.features.length)
+
+        const polygonFeature = clickResult.features[0]
+        if (!polygonFeature) {
+          console.log('[RAS Reviewer] No polygon found at clicked location')
+          return
+        }
+
+        const attributes = polygonFeature.attributes || {}
         const allotmentNumber = String(attributes[polygonFieldName] || '')
         const officeId = String(attributes[officeFieldName] || '')
         const joinValue = String(attributes[joinFieldName] || '')
         const allotmentName = String(attributes.ALLOT_NAME || '')
 
-        console.log('[RAS Reviewer] Clicked polygon attributes', {
+        console.log('[RAS Reviewer] Click-selected polygon attributes', {
           allotmentNumber,
           officeId,
           joinValue,
@@ -324,7 +342,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
           officeId: officeId,
           allotmentName: allotmentName,
           joinValue: joinValue,
-          geometry: graphic.geometry
+          geometry: polygonFeature.geometry
         })
       } catch (error) {
         console.error(error)
@@ -334,7 +352,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     return () => {
       clickHandle.remove()
     }
-  }, [jimuMapView, polygonLayer, config])
+  }, [jimuMapView, queryPolygonLayer, config])
 
   useEffect(() => {
     if (!jimuMapView || !activePolygon?.geometry) {
@@ -346,10 +364,10 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
 
   useEffect(() => {
     void applyApprovalFilter()
-  }, [showApproved, showRejected, polygonLayer, reviewTable])
+  }, [showApproved, showRejected, displayPolygonSublayer, reviewTable])
 
   async function applyApprovalFilter() {
-    if (!polygonLayer || !reviewTable) {
+    if (!displayPolygonSublayer || !reviewTable) {
       return
     }
 
@@ -358,12 +376,12 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
     const polygonJoinField = config.polygonJoinField || 'Original_GlobalID'
 
     if (showApproved && showRejected) {
-      polygonLayer.definitionExpression = ''
+      displayPolygonSublayer.definitionExpression = ''
       return
     }
 
     if (!showApproved && !showRejected) {
-      polygonLayer.definitionExpression = '1 = 0'
+      displayPolygonSublayer.definitionExpression = '1 = 0'
       clearSelectionBecauseOfFilter()
       return
     }
@@ -396,7 +414,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       }
 
       if (joinValues.length === 0) {
-        polygonLayer.definitionExpression = '1 = 0'
+        displayPolygonSublayer.definitionExpression = '1 = 0'
         clearSelectionBecauseOfFilter()
         return
       }
@@ -405,7 +423,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       const valueChunks = chunkValues(uniqueJoinValues, 200)
       const chunkClauses = valueChunks.map((chunk) => `(${buildInClause(polygonJoinField, chunk)})`)
 
-      polygonLayer.definitionExpression = chunkClauses.join(' OR ')
+      displayPolygonSublayer.definitionExpression = chunkClauses.join(' OR ')
 
       if (activePolygon && !uniqueJoinValues.includes(activePolygon.joinValue)) {
         clearSelectionBecauseOfFilter()
@@ -432,7 +450,7 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
   }
 
   async function loadReviewTargetFromUrl(allotmentNumber: string, officeId: string) {
-    if (!polygonLayer) {
+    if (!queryPolygonLayer) {
       setStatusType('error')
       setStatusMessage('Configure the polygon layer first.')
       return
@@ -448,13 +466,13 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       const officeField = config.officeField || 'officeid'
       const joinField = config.polygonJoinField || 'Original_GlobalID'
 
-      const polygonQuery = polygonLayer.createQuery()
-      polygonQuery.where = buildAndWhereClause(polygonIdField, allotmentNumber, officeField, officeId)
+      const polygonQuery = queryPolygonLayer.createQuery()
+      polygonQuery.where = buildAndWhereClause(polygonIdField, allotmentNumber)
       polygonQuery.returnGeometry = true
       polygonQuery.outFields = ['*']
       console.log('[RAS Reviewer] Polygon query', polygonQuery.where)
 
-      const polygonResult = await polygonLayer.queryFeatures(polygonQuery)
+      const polygonResult = await queryPolygonLayer.queryFeatures(polygonQuery)
       const polygonFeature = polygonResult.features[0]
       console.log('[RAS Reviewer] Polygon query result count', polygonResult.features.length)
 
@@ -540,7 +558,8 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
         objectId: String(tableAttributes.OBJECTID || ''),
         decision: existingDecision,
         comments: existingComments,
-        joinValue: String(tableAttributes[tableJoinField] || '')
+        joinValue: String(tableAttributes[tableJoinField] || ''),
+        lastEditedUser: String(tableAttributes.last_edited_user || '')
       })
 
       if (existingDecision === 'Approved' || existingDecision === 'Rejected') {
@@ -558,6 +577,79 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
       setStatusMessage('Failed to load the related review record.')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function reloadReviewTableRecord(joinValue: string): Promise<TableRecordSummary | null> {
+    if (!reviewTable) {
+      return null
+    }
+
+    const tableJoinField = config.tableJoinField || 'Original_GlobalID'
+    const approvalField = config.approvalField || 'APPROVAL_FLAG'
+    const commentsField = config.commentsField || 'Comments'
+
+    const tableQuery = reviewTable.createQuery()
+    tableQuery.where = buildWhereClause(tableJoinField, joinValue)
+    tableQuery.outFields = ['*']
+    tableQuery.returnGeometry = false
+
+    const tableResult = await reviewTable.queryFeatures(tableQuery)
+    const tableFeature = tableResult.features[0]
+
+    if (!tableFeature) {
+      return null
+    }
+
+    const tableAttributes = tableFeature.attributes || {}
+
+    return {
+      objectId: String(tableAttributes.OBJECTID || ''),
+      decision: String(tableAttributes[approvalField] || ''),
+      comments: String(tableAttributes[commentsField] || ''),
+      joinValue: String(tableAttributes[tableJoinField] || ''),
+      lastEditedUser: String(tableAttributes.last_edited_user || '')
+    }
+  }
+
+  async function sendRejectEmail(tableRecord: TableRecordSummary, polygon: PolygonSummary, rejectionReason: string) {
+    const recipient = tableRecord.lastEditedUser
+
+    if (!recipient) {
+      console.log('[RAS Reviewer] No last_edited_user found, skipping reject email')
+      return
+    }
+
+    const subject = `RAS review rejected for allotment ${polygon.allotmentNumber}`
+    const text = [
+      'Your RAS review submission was rejected.',
+      '',
+      `Allotment: ${polygon.allotmentNumber}`,
+      `Allotment Name: ${polygon.allotmentName || 'Not set'}`,
+      `Office ID: ${polygon.officeId || 'Not set'}`,
+      '',
+      'Reason:',
+      rejectionReason,
+      '',
+      'Please forward this to your GIS team member who can make the needed correction for the allotment polygon issue.'
+    ].join('\n')
+
+    const response = await fetch('http://localhost:8010/send-email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': 'change-me'
+      },
+      body: JSON.stringify({
+        to: [recipient],
+        subject,
+        text
+      })
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`Reject email failed: ${errorText}`)
     }
   }
 
@@ -637,14 +729,26 @@ const Widget = (props: AllWidgetProps<IMConfig>) => {
 
       console.log('[RAS Reviewer] applyEdits result', editResult)
       const updateResult = editResult.updateFeatureResults && editResult.updateFeatureResults[0]
-      if (updateResult && updateResult.success) {
-        setActiveTableRecord({
-          ...activeTableRecord,
-          decision: decision,
-          comments: decision === 'Rejected' ? rejectComments : ''
-        })
+      const hasEditError = Boolean(updateResult?.error)
+      const editSucceeded = Boolean(updateResult) && !hasEditError
+
+      if (editSucceeded) {
+        const refreshedRecord = await reloadReviewTableRecord(activeTableRecord.joinValue)
+
+        if (refreshedRecord) {
+          setActiveTableRecord(refreshedRecord)
+        }
+
+        if (decision === 'Rejected' && refreshedRecord && activePolygon) {
+          await sendRejectEmail(refreshedRecord, activePolygon, rejectComments)
+        }
+
         setStatusType('success')
-        setStatusMessage('Review decision saved successfully.')
+        setStatusMessage(
+          decision === 'Rejected'
+            ? 'Review decision saved and rejection email sent successfully.'
+            : 'Review decision saved successfully.'
+        )
         await applyApprovalFilter()
       } else {
         setStatusType('error')
