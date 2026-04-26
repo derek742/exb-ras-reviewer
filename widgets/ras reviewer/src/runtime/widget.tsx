@@ -156,7 +156,7 @@ function findMapImageSublayerByTitle(map: __esri.Map, title: string): __esri.Sub
         return
       }
 
-      if (sublayer.title === title) {
+      if (sublayer.title === 'Grazing Allotment Polygons') {
         matchedSublayer = sublayer
       }
     })
